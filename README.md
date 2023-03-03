@@ -1,27 +1,31 @@
 # Making sense of censored covariates: Statistical methods for studies of Huntington’s disease
 ## Software Supplement
 
-### NAIVE ANALYSIS 
+### NAIVE ANALYSIS (Section 4)
 
-### COMPLETE CASE ANALYSIS 
+### COMPLETE CASE ANALYSIS (Section 5)
 
-### WEIGHTED METHODS 
+### WEIGHTED METHODS (Section 6)
 
 #### Inverse probability weighting (IPW)
 
 #### Augmented inverse probability weighting (AIPW) 
 
-### IMPUTATION METHODS
+### IMPUTATION METHODS (Section 7)
 
-### MAXIMUM LIKELIHOOD ESTIMATION (MLE)
+#### Single imputation 
+
+#### Multiple imputation
+
+### MAXIMUM LIKELIHOOD ESTIMATION (MLE) (Section 8)
 
 #### Parametric MLE 
 
 #### Semiparametric MLE 
 
-### BAYESIAN METHODS 
+### BAYESIAN METHODS (Section 9)
 
-### OTHER METHODS 
+### OTHER METHODS (Section 10)
 
 #### Thresholding (dichotomization) 
 
