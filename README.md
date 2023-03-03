@@ -22,3 +22,9 @@
 ### BAYESIAN METHODS 
 
 ### OTHER METHODS 
+
+#### Thresholding (dichotomization) 
+
+#### Subtitution 
+
+#### Reverse survival regression
