@@ -17,6 +17,10 @@ set.seed(128)
 ## Load the censCov package (Qian et al 2018)
 ### contains thlm function for thresholding methods, complete case, and reverse survival regression
 library(censCov)
+
+# Load the survival package 
+### used to fit models for the weights for IPW
+library(survival) 
 ```
 
 ### DATA GENERATION
@@ -46,14 +50,26 @@ random_right_dat = data.frame(z, w, y, d) ## Construct data set
 ### SECTION 3: USING REVERSE SURVIVAL REGRESSION TO HANDLE A CENSORED COVARIATE
 
 ``` r
-# Reverse survival regression
+# Reverse survival regression "by hand"
 ## Fit survival model where x is treated as the outcome rather than a covariate
-fit_reverse_survival = thlm(y ~ w + z, cens = d, data = random_right_dat,
+fit_reverse_survival = coxph(formula = Surv(time = w, event = d) ~ y + z, data = random_right_dat)
+## Report results for a test of association between x and y, while controlling for z
+## Note: parameter interpretations change when we use survival regression, so we
+##       only report the hypothesis test result here
+summary(fit_reverse_survival)$coefficients[1,5]
+```
+
+    ## [1] 1.795412e-08
+
+``` r
+# Reverse survival regression with thlm
+## Fit survival model where x is treated as the outcome rather than a covariate
+fit_reverse_survival_thlm = thlm(y ~ w + z, cens = d, data = random_right_dat,
                             method = "reverse", control = list(t0.plot = FALSE))
 ## Report results for a test of association between x and y, while controlling for z
 ## Note: parameter interpretations change when we use survival regression, so we
 ##       only report the hypothesis test result here
-fit_reverse_survival
+fit_reverse_survival_thlm
 ```
 
     ## 
@@ -87,7 +103,7 @@ data.frame(coeff = coeff_naive, se = se_naive)
 ### SECTION 5: COMPLETE CASE ANALYSIS
 
 ``` r
-# Complete case analysis
+# Complete case analysis "by hand"
 ## Remove observations with censored x
 random_right_dat_complete = random_right_dat[random_right_dat$d == 1, ]
 ## Fit the model to "complete" cases (with uncensored x)
@@ -103,12 +119,22 @@ data.frame(coeff = coeff_complete, se = se_complete)
     ## w           0.8380126 0.30051911
     ## z           0.1377386 0.08724157
 
-### SECTION 6: WEIGHTING METHODS
-
 ``` r
-# Load the survival package 
-library(survival) ## used to fit models for the weights 
+# Complete case analysis with thlm
+fit_complete_thlm = thlm(y ~ w + z, cens = d, data = random_right_dat,
+                            method = "cc", control = list(t0.plot = FALSE))
+## estimating std dev of coefficient for x
+coeff_complete_thlm <- c(fit_complete_thlm$a1, fit_complete_thlm$a2)
+se_complete_thlm <- c(fit_complete_thlm$a1.sd, fit_complete_thlm$a2.sd)
+## Inspect results
+data.frame(coeff = coeff_complete_thlm, se = se_complete_thlm, row.names = c("x", "z"))
 ```
+
+    ##       coeff         se
+    ## x 0.8380126 0.30051911
+    ## z 0.1377386 0.08724157
+
+### SECTION 6: WEIGHTING METHODS
 
 #### 6.1 Inverse probability weighting (IPW)
 
@@ -146,6 +172,12 @@ data.frame(coeff = coeff_complete, se = se_complete)
 ```
 
 #### 6.2 Augmented inverse probability weighting (AIPW)
+
+There is no simple implementation of AIPW for censored covariates that
+we are aware of. However, Ahn et al 2018 share their code with their
+manuscript (this is for a model with an interval censored covariate and
+a time-to-event outcome). The code can be found in the Supporting
+Information section [here](https://doi.org/10.1002/bimj.201700090).
 
 ### SECTION 7: IMPUTATION METHODS
 
