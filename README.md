@@ -11,18 +11,25 @@ Huntington’s disease
 set.seed(128)
 ```
 
+``` r
+# packages needed 
+
+## Load the censCov package (Qian et al 2018)
+### contains thlm function for thresholding methods, complete case, and reverse survival regression
+library(censCov)
+```
+
 ### DATA GENERATION
 
-Simulate a dataset for a sample of $n = 1000$ observations under heavy
+Simulate a dataset for a sample of *n* = 1000 observations under heavy
 (\~40%) **random right censoring**. Specifically,
 
-- $Z \sim \textrm{Bernoulli}(0.5)$,
-- $X \sim \textrm{Weibull}(0.75, 0.25)$,
-- $Y = 1 + 0.5X + 0.25Z + \epsilon$ (for
-  $\epsilon \sim \textrm{N}(0, 1)$),
-- $C \sim \textrm{Expo}(2.9)$,
-- $W = \min(X, C)$, and
-- $\Delta = \textrm{I}(X \leq C)$.
+-   *Z* ∼ Bernoulli(0.5),
+-   *X* ∼ Weibull(0.75, 0.25),
+-   *Y* = 1 + 0.5*X* + 0.25*Z* + *ϵ* (for *ϵ* ∼ N(0, 1)),
+-   *C* ∼ Expo(2.9),
+-   *W* = min (*X*, *C*), and
+-   *Δ* = I(*X* ≤ *C*).
 
 ``` r
 # Create simulated dataset 
@@ -36,7 +43,29 @@ d = as.numeric(x <= c) ## "Event" indicator
 random_right_dat = data.frame(z, w, y, d) ## Construct data set
 ```
 
-### NAIVE ANALYSIS (Section 4)
+### SECTION 3: USING REVERSE SURVIVAL REGRESSION TO HANDLE A CENSORED COVARIATE
+
+``` r
+# Reverse survival regression
+## Fit survival model where x is treated as the outcome rather than a covariate
+fit_reverse_survival = thlm(y ~ w + z, cens = d, data = random_right_dat,
+                            method = "reverse", control = list(t0.plot = FALSE))
+## Report results for a test of association between x and y, while controlling for z
+## Note: parameter interpretations change when we use survival regression, so we
+##       only report the hypothesis test result here
+fit_reverse_survival
+```
+
+    ## 
+    ##  Call: thlm(formula = y ~ w + z, data = random_right_dat, cens = d, 
+    ##     method = "reverse", control = list(t0.plot = FALSE))
+    ## 
+    ##  Hypothesis test of association, H0: a1 = 0
+    ## p-value = 0.0000
+
+### SECTION 4: METHODS THAT PRODUCE BIAS
+
+#### 4.1 Naive Analysis
 
 ``` r
 # Naive analysis
@@ -53,7 +82,9 @@ data.frame(coeff = coeff_naive, se = se_naive)
     ## w           0.9586777 0.19591964
     ## z           0.2408399 0.06669586
 
-### COMPLETE CASE ANALYSIS (Section 5)
+#### 4.2 Substitution
+
+### SECTION 5: COMPLETE CASE ANALYSIS
 
 ``` r
 # Complete case analysis
@@ -72,14 +103,14 @@ data.frame(coeff = coeff_complete, se = se_complete)
     ## w           0.8380126 0.30051911
     ## z           0.1377386 0.08724157
 
-### WEIGHTED METHODS (Section 6)
+### SECTION 6: WEIGHTING METHODS
 
 ``` r
 # Load the survival package 
 library(survival) ## used to fit models for the weights 
 ```
 
-#### Inverse probability weighting (IPW)
+#### 6.1 Inverse probability weighting (IPW)
 
 ``` r
 # IPW analysis
@@ -114,32 +145,25 @@ se_complete <- sqrt(diag(vcov(fit_complete)))
 data.frame(coeff = coeff_complete, se = se_complete)
 ```
 
-#### Augmented inverse probability weighting (AIPW)
+#### 6.2 Augmented inverse probability weighting (AIPW)
 
-### IMPUTATION METHODS (Section 7)
+### SECTION 7: IMPUTATION METHODS
 
 #### Single imputation
 
 #### Multiple imputation
 
-### MAXIMUM LIKELIHOOD ESTIMATION (MLE) (Section 8)
+### SECTION 8: MAXIMUM LIKELIHOOD ESTIMATION (MLE)
 
 #### Parametric MLE
 
 #### Semiparametric MLE
 
-### BAYESIAN METHODS (Section 9)
+### SECTION 9: BAYESIAN METHODS
 
-### OTHER METHODS (Section 10)
+### SCETION 10: THRESHOLD METHODS (DICHOTOMIZATION)
 
-``` r
-## Load the censCov package (Qian et al)
-library(censCov)
-```
-
-#### Thresholding (dichotomization)
-
-##### Deletion Thresholding
+#### Deletion Thresholding
 
 ``` r
 # Deletion Thresholding analysis
@@ -157,7 +181,7 @@ data.frame(coeff = coeff_deletion_threshold, se = se_deletion_threshold, row.nam
     ## x 0.7118696 0.16830116
     ## z 0.1944697 0.07969871
 
-##### Complete Thresholding
+#### Complete Thresholding
 
 ``` r
 # Complete Thresholding analysis
@@ -174,25 +198,3 @@ data.frame(coeff = coeff_complete_threshold, se = se_complete_threshold, row.nam
     ##       coeff        se
     ## x 0.7682436 0.2359501
     ## z 0.2391911 0.0670703
-
-#### Subtitution
-
-#### Reverse survival regression
-
-``` r
-# Reverse survival regression
-## Fit survival model where x is treated as the outcome rather than a covariate
-fit_reverse_survival = thlm(y ~ w + z, cens = d, data = random_right_dat,
-                            method = "reverse", control = list(t0.plot = FALSE))
-## Report results for a test of association between x and y, while controlling for z
-## Note: parameter interpretations change when we use survival regression, so we
-##       only report the hypothesis test result here
-fit_reverse_survival
-```
-
-    ## 
-    ##  Call: thlm(formula = y ~ w + z, data = random_right_dat, cens = d, 
-    ##     method = "reverse", control = list(t0.plot = FALSE))
-    ## 
-    ##  Hypothesis test of association, H0: a1 = 0
-    ## p-value = 0.0000
