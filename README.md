@@ -132,8 +132,69 @@ data.frame(coeff = coeff_complete, se = se_complete)
 
 ### OTHER METHODS (Section 10)
 
+``` r
+## Load the censCov package (Qian et al)
+library(censCov)
+```
+
+    ## Warning: package 'censCov' was built under R version 4.2.3
+
 #### Thresholding (dichotomization)
+
+##### Deletion Thresholding
+
+``` r
+# Deletion Thresholding analysis
+## Fit model using dichotomized covariate and with indeterminate observations deleted
+fit_deletion_threshold = thlm(y ~ w + z, cens = d, data = random_right_dat,
+                              method = "dt", control = list(t0.plot = FALSE),
+                              B = 100) # 100 bootstrap replicates for estimating std dev of coefficient for x
+coeff_deletion_threshold <- c(fit_deletion_threshold$a1, fit_deletion_threshold$a2)
+se_deletion_threshold <- c(fit_deletion_threshold$a1.sd, fit_deletion_threshold$a2.sd)
+## Inspect results
+data.frame(coeff = coeff_deletion_threshold, se = se_deletion_threshold, row.names = c("x", "z"))
+```
+
+    ##       coeff         se
+    ## x 0.7118696 0.16830116
+    ## z 0.1944697 0.07969871
+
+##### Complete Thresholding
+
+``` r
+# Complete Thresholding analysis
+## Fit model using dichotomized covariate derived from w
+fit_complete_threshold = thlm(y ~ w + z, cens = d, data = random_right_dat,
+                              method = "ct", control = list(t0.plot = FALSE),
+                              B = 100) # 100 bootstrap replicates for estimating std dev of coefficient for x
+coeff_complete_threshold <- c(fit_complete_threshold$a1, fit_complete_threshold$a2)
+se_complete_threshold <- c(fit_complete_threshold$a1.sd, fit_complete_threshold$a2.sd)
+## Inspect results
+data.frame(coeff = coeff_complete_threshold, se = se_complete_threshold, row.names = c("x", "z"))
+```
+
+    ##       coeff        se
+    ## x 0.7682436 0.2359501
+    ## z 0.2391911 0.0670703
 
 #### Subtitution
 
 #### Reverse survival regression
+
+``` r
+# Reverse survival regression
+## Fit survival model where x is treated as the outcome rather than a covariate
+fit_reverse_survival = thlm(y ~ w + z, cens = d, data = random_right_dat,
+                            method = "reverse", control = list(t0.plot = FALSE))
+## Report results for a test of association between x and y, while controlling for z
+## Note: parameter interpretations change when we use survival regression, so we
+##       only report the hypothesis test result here
+fit_reverse_survival
+```
+
+    ## 
+    ##  Call: thlm(formula = y ~ w + z, data = random_right_dat, cens = d, 
+    ##     method = "reverse", control = list(t0.plot = FALSE))
+    ## 
+    ##  Hypothesis test of association, H0: a1 = 0
+    ## p-value = 0.0000
