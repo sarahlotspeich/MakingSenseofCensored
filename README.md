@@ -193,6 +193,10 @@ Information section [here](https://doi.org/10.1002/bimj.201700090).
 
 ### SECTION 9: BAYESIAN METHODS
 
+There is no simple implementation of Bayesian Methods for censored
+covariates that we are aware of. Bayesian specific software, such as
+winBUGS and Stan, may be useful.
+
 ### SCETION 10: THRESHOLD METHODS (DICHOTOMIZATION)
 
 #### Deletion Thresholding
