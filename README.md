@@ -137,8 +137,6 @@ data.frame(coeff = coeff_complete, se = se_complete)
 library(censCov)
 ```
 
-    ## Warning: package 'censCov' was built under R version 4.2.3
-
 #### Thresholding (dichotomization)
 
 ##### Deletion Thresholding

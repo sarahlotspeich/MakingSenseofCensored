@@ -124,7 +124,7 @@ data.frame(coeff = coeff_complete, se = se_complete)
 
 ### OTHER METHODS (Section 10)
 
-```{r}
+```{r warning = F}
 ## Load the censCov package (Qian et al)
 library(censCov)
 ```
