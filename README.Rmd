@@ -120,35 +120,23 @@ data.frame(coeff = coeff_complete_thlm, se = se_complete_thlm, row.names = c("x"
 
 ```{r, eval = FALSE}
 # IPW analysis
-## Estimate probabilities of being uncensored
-### Fit a model for the hazard function of being censored given z 
-fit_weights = coxph(formula = Surv(time = w, event = (1-d)) ~ z, 
-                    data = random_right_dat)
-### Use the model to estimate the survival function of c
-### (i.e., probability of being uncensored) for each complete observation
-prob_uncensor = survfit(formula = fit_weights, 
-                        newdata = random_right_dat_complete)
-### Use the summary() function to get p(d = 1|z) for each complete case
+## Estimate probabilities of being uncensored. Can use a logisitc regression, 
+## Cox-proportional hazards model, Kapla-Meier curve
 
+### In this example we fit a logisitc regression model using the logit link 
+### function given z on the probability of being observed. 
+mylogisitc = glm(d ~ z, data=random_right_dat, family = "binomial")
 
+# Estimate weights for only observed cases: 1/Pr(Delta=1)
+random_right_dat_complete$weights_logisitc = 
+  1/predict(mylogisitc, random_right_dat_complete)
 
-weights = data.frame(x = summary(object = prob_uncensor, 
-                                 times = extend)$time, 
-                     ipw = 1 / diag(summary(object = prob_uncensor, extend = TRUE)$surv))
-
-weights = data.frame()
-weights_df <- data.frame(X = summary(G, times = data_sim$X, extend = TRUE)$time,
-                        weights = summary(G, times = data_sim$X, extend = TRUE)$surv %>% diag())
-      data_sim <- data_sim %>% left_join(weights_df, by = "X")
-
-## Remove observations with censored x
-random_right_dat_complete = random_right_dat[random_right_dat$d == 1, ]
-## Fit the model to "complete" cases (with uncensored x)
-fit_complete = lm(y ~ w + z, data = random_right_dat_complete)
-coeff_complete <- fit_complete$coefficients
-se_complete <- sqrt(diag(vcov(fit_complete)))
+## Fit the model to "complete" weighted cases (with uncensored x)
+fit_ipw = lm(y ~ w + z, data = random_right_dat_complete, weights = weights_logisitc)
+coeff_ipw <- fit_ipw$coefficients
+se_ipw <- sqrt(diag(vcov(fit_ipw)))
 ## Inspect results
-data.frame(coeff = coeff_complete, se = se_complete)
+data.frame(coeff = coeff_ipw, se = se_ipw)
 ```
 
 #### 6.2 Augmented inverse probability weighting (AIPW) 
