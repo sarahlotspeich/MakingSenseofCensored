@@ -15,6 +15,14 @@ knitr::opts_chunk$set(echo = TRUE)
 set.seed(128)
 ```
 
+```{r, warning = F}
+# packages needed 
+
+## Load the censCov package (Qian et al 2018)
+### contains thlm function for thresholding methods, complete case, and reverse survival regression
+library(censCov)
+```
+
 ### DATA GENERATION
 
 Simulate a dataset for a sample of $n = 1000$ observations under heavy (~40%) **random right censoring**. Specifically, 
@@ -38,7 +46,22 @@ d = as.numeric(x <= c) ## "Event" indicator
 random_right_dat = data.frame(z, w, y, d) ## Construct data set
 ```
 
-### NAIVE ANALYSIS (Section 4)
+### SECTION 3: USING REVERSE SURVIVAL REGRESSION TO HANDLE A CENSORED COVARIATE
+
+```{r}
+# Reverse survival regression
+## Fit survival model where x is treated as the outcome rather than a covariate
+fit_reverse_survival = thlm(y ~ w + z, cens = d, data = random_right_dat,
+                            method = "reverse", control = list(t0.plot = FALSE))
+## Report results for a test of association between x and y, while controlling for z
+## Note: parameter interpretations change when we use survival regression, so we
+##       only report the hypothesis test result here
+fit_reverse_survival
+```
+
+### SECTION 4: METHODS THAT PRODUCE BIAS 
+
+#### 4.1 Naive Analysis
 
 ```{r}
 # Naive analysis
@@ -50,7 +73,9 @@ se_naive <- sqrt(diag(vcov(fit_naive)))
 data.frame(coeff = coeff_naive, se = se_naive)
 ```
 
-### COMPLETE CASE ANALYSIS (Section 5)
+#### 4.2 Substitution 
+
+### SECTION 5: COMPLETE CASE ANALYSIS 
 
 ```{r}
 # Complete case analysis
@@ -64,14 +89,14 @@ se_complete <- sqrt(diag(vcov(fit_complete)))
 data.frame(coeff = coeff_complete, se = se_complete)
 ```
 
-### WEIGHTED METHODS (Section 6)
+### SECTION 6: WEIGHTING METHODS
 
 ```{r}
 # Load the survival package 
 library(survival) ## used to fit models for the weights 
 ```
 
-#### Inverse probability weighting (IPW)
+#### 6.1 Inverse probability weighting (IPW)
 
 ```{r, eval = FALSE}
 # IPW analysis
@@ -106,32 +131,25 @@ se_complete <- sqrt(diag(vcov(fit_complete)))
 data.frame(coeff = coeff_complete, se = se_complete)
 ```
 
-#### Augmented inverse probability weighting (AIPW) 
+#### 6.2 Augmented inverse probability weighting (AIPW) 
 
-### IMPUTATION METHODS (Section 7)
+### SECTION 7: IMPUTATION METHODS
 
 #### Single imputation 
 
 #### Multiple imputation
 
-### MAXIMUM LIKELIHOOD ESTIMATION (MLE) (Section 8)
+### SECTION 8: MAXIMUM LIKELIHOOD ESTIMATION (MLE) 
 
 #### Parametric MLE 
 
 #### Semiparametric MLE 
 
-### BAYESIAN METHODS (Section 9)
+### SECTION 9: BAYESIAN METHODS
 
-### OTHER METHODS (Section 10)
+### SCETION 10: THRESHOLD METHODS (DICHOTOMIZATION) 
 
-```{r warning = F}
-## Load the censCov package (Qian et al)
-library(censCov)
-```
-
-#### Thresholding (dichotomization)
-
-##### Deletion Thresholding
+#### Deletion Thresholding
 
 ```{r}
 # Deletion Thresholding analysis
@@ -145,7 +163,7 @@ se_deletion_threshold <- c(fit_deletion_threshold$a1.sd, fit_deletion_threshold$
 data.frame(coeff = coeff_deletion_threshold, se = se_deletion_threshold, row.names = c("x", "z"))
 ```
 
-##### Complete Thresholding
+#### Complete Thresholding
 
 ```{r}
 # Complete Thresholding analysis
@@ -160,18 +178,4 @@ data.frame(coeff = coeff_complete_threshold, se = se_complete_threshold, row.nam
 ```
 
 
-#### Subtitution 
-
-#### Reverse survival regression
-
-```{r}
-# Reverse survival regression
-## Fit survival model where x is treated as the outcome rather than a covariate
-fit_reverse_survival = thlm(y ~ w + z, cens = d, data = random_right_dat,
-                            method = "reverse", control = list(t0.plot = FALSE))
-## Report results for a test of association between x and y, while controlling for z
-## Note: parameter interpretations change when we use survival regression, so we
-##       only report the hypothesis test result here
-fit_reverse_survival
-```
 
