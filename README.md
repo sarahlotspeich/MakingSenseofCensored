@@ -185,7 +185,7 @@ Information section [here](https://doi.org/10.1002/bimj.201700090).
 
 #### Multiple imputation
 
-### SECTION 8: MAXIMUM LIKELIHOOD ESTIMATION (MLE)
+### SECTION 8: MAXIMUM LIKELIHOOD METHODS
 
 #### Parametric MLE
 
