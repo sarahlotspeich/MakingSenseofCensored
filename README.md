@@ -47,7 +47,7 @@ d = as.numeric(x <= c) ## "Event" indicator
 random_right_dat = data.frame(z, w, y, d) ## Construct data set
 ```
 
-### SECTION 3: USING REVERSE SURVIVAL REGRESSION TO HANDLE A CENSORED COVARIATE
+### SECTION 3: REVERSE SURVIVAL REGRESSION
 
 ``` r
 # Reverse survival regression "by hand"
