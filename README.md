@@ -4,7 +4,7 @@ Huntington’s disease
 
 ## Software Supplement
 
-## Lotspeich et al. 
+## Lotspeich, Ashner, Vazquez, Richardson, Grosser, Bodek and Garcia (2023+) 
 
 ``` r
 # Set seed for reproducibility
@@ -12,8 +12,6 @@ set.seed(128)
 ```
 
 ``` r
-# packages needed 
-
 ## Load the censCov package (Qian et al 2018)
 ### contains thlm function for thresholding methods, complete case, and reverse survival regression
 library(censCov)
