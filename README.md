@@ -189,6 +189,9 @@ Information section [here](https://doi.org/10.1002/bimj.201700090).
 
 #### Semiparametric MLE
 
+There is no simple implementation of semiparametric MLE for censored covariates that
+we are aware of. However, Kong and Nan give an overview of the necessary steps to coding on in Section 3 of their paper, which can be found [here](https://academic.oup.com/biomet/article/103/1/161/2389883#113398541).
+
 ### SECTION 9: BAYESIAN METHODS
 
 There is no simple implementation of Bayesian Methods for censored
