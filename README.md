@@ -4,10 +4,7 @@ Huntington’s disease
 ### Lotspeich, Ashner, Vazquez, Richardson, Grosser, Bodek and Garcia (2023+) 
 ## Software Supplement
 
-``` r
-# Set seed for reproducibility
-set.seed(128)
-```
+### LOAD PACKAGES
 
 ``` r
 ## Load the censCov package (Qian et al 2018)
@@ -20,6 +17,11 @@ library(survival)
 ```
 
 ### DATA GENERATION
+
+``` r
+# Set seed for reproducibility
+set.seed(128)
+```
 
 Simulate a dataset for a sample of *n* = 1000 observations under heavy
 (\~40%) **random right censoring**. Specifically,
