@@ -1,0 +1,1604 @@
+---
+title: "Naive-Analysis"
+output: html_document
+date: "2023-02-05"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE)
+library(ggplot2)
+library(latex2exp)
+library(ggthemes)
+library(dplyr)
+library(tidyr)
+
+make_boxplot = function(d) {
+  d_wide = d |> 
+    group_by(censoring, n) |> 
+    gather("var", "val", -c(1:4)) |> 
+    mutate(param = gsub(".*_", "", var),
+           var = gsub("_.*", "", var)) |> 
+    pivot_wider(names_from = var, 
+                values_from = val)
+
+  d_wide |> 
+    mutate(censoring = factor(censoring, c("light", "heavy", "extra_heavy"), c("Light", "Heavy", "Extra Heavy")),
+           param = factor(param, c("alpha", "beta", "gamma"), 
+                          c(TeX("$\\hat{\\alpha}$: Intercept"), 
+                            TeX("$\\hat{\\beta}$: Coefficient on $X$"),
+                            TeX("$\\hat{\\gamma}$: Coefficient on $Z$")
+                            )),
+           n = factor(n)) |> 
+    ggplot(aes(x = censoring, y = est, fill = n)) + 
+    geom_boxplot() + 
+    geom_hline(aes(yintercept = true), linetype = 2, col = "red") +
+    theme_minimal(base_size = 16) + 
+    facet_wrap(~param, scales = "free", labeller = label_parsed) + 
+    theme(legend.position = "top") + 
+    xlab("Censoring") + 
+    ylab("Parameter Estimate") + 
+    scale_fill_colorblind(name = "Sample Size:")
+}
+```
+
+# Bias {.tabset}
+
+## Right random censoring {.tabset}
+
+### $X \perp Z$
+
+Simulate 1000 datasets each for samples of $n = 100, 500, 1000, 2000$ observations under light (12\%), heavy (~40%), and extra heavy (~78%) censoring. Specifically, 
+
+  -   $Z \sim \textrm{Bernoulli}(0.5)$,
+  -   $X | Z = X \sim \textrm{Weibull}(0.75, 0.25)$,
+  -   $Y = 1 + 0.5X + 0.25Z + \epsilon$ (for $\epsilon \sim \textrm{N}(0, 1)$),
+  -   $C \sim \textrm{Expo}(q)$ (for $q = 0.5$ for light, $q = 2.9$ for heavy, and $q = 20$ for extra heavy), 
+  -   $W = \min(X, C)$, and 
+  -   $\Delta = \textrm{I}(X \leq C)$. 
+
+```{r, eval = F}
+# Data generation function based on Atem et al. (2017)'s "independent censoring" censoring
+generate_data = function(n, censoring = "light") {
+  z = rbinom(n = n, size = 1, prob = 0.5) # Uncensored covariate
+  x = rweibull(n = n, shape = 0.75, scale = 0.25)  # To-be-censored covariate
+  e = rnorm(n = n, mean = 0, sd = 1) # Random errors
+  y = 1 + 0.5 * x + 0.25 * z + e # Continuous outcome
+  q = ifelse(test = censoring == "light", 
+             yes = 0.5, ## ~ 12%
+             no = ifelse(test = censoring == "heavy", 
+                         yes = 2.9, ## ~ 41%
+                         no = 20) ## ~ 78%
+  ) # Rate parameter for censoring
+  c = rexp(n = n, rate = q) # Random censoring mechanism
+  w = pmin(x, c) # Observed covariate value
+  d = as.numeric(x <= c) # "Event" indicator
+  dat = data.frame(x, z, w, y, d) # Construct data set
+  return(dat)
+}
+
+# Set the number of replicates per setting
+reps = 1000
+
+# Choose seed 
+sim_seed = 114
+
+# Loop over different censoring rates: light, heavy, extra heavy
+for (censoring in c("light", "heavy", "extra_heavy")) {
+  # And different sample sizes n = 100, 500, 1000, 2000
+  for (n in c(100, 500, 1000, 2000)){
+    # For reproducibility
+    set.seed(sim_seed) 
+    
+    # Create dataframe to save results for setting
+    sett_res = data.frame(sim = paste(sim_seed, 1:reps, sep = "-"), censoring, n, perc_censored = NA, 
+                          true_alpha = 1, true_beta = 0.5, true_gamma = 0.25, 
+                          est_alpha = NA, est_beta = NA, est_gamma = NA, 
+                          se_alpha = NA, se_beta = NA, se_gamma = NA
+    )
+    
+    # Loop over replicates 
+    for (r in 1:reps) {
+      # Generate data
+      dat = generate_data(n = n, 
+                          censoring = censoring)
+      
+      # Save % censored
+      sett_res$perc_censored[r] = 1 - mean(dat$d)
+      
+      # Method 1: Full cohort analysis
+      fit_naive = lm(y ~ w + z, data = dat)
+      sett_res[r, c("est_alpha", "est_beta", "est_gamma")] <- fit_naive$coefficients
+      sett_res[r, c("se_alpha", "se_beta", "se_gamma")] <- sqrt(diag(vcov(fit_naive)))
+      
+      # Save results
+      write.csv(x = sett_res, 
+                file = paste0("naive/right-random/XindepZ/", censoring, "_n", n, "_seed", sim_seed, ".csv"), 
+                row.names = F)
+    }
+  }
+}
+```
+
+```{r, fig.width = 12, fig.height = 8, echo = FALSE}
+f = paste0("~/Downloads/naive/right-random/XindepZ/", list.files("~/Downloads/naive/right-random/XindepZ"))
+d = do.call(rbind, 
+            lapply(X = f, FUN = read.csv))
+
+# Check censoring rates 
+d |> 
+  group_by(censoring) |> 
+  summarize(perc_censored = mean(perc_censored))
+
+plot_indep = d |> 
+  make_boxplot()
+plot_indep
+#ggsave(filename = "random-right-XindepZ-naive-bias", device = "png", width = 12, height = 8, units = "in")
+```
+
+### $X | Z$
+
+As with $X \perp Z$, except that $X | Z \sim \textrm{Weibull}(0.75 - 0.25Z, 0.25)$. 
+
+```{r, eval = F}
+# Data generation function based on Atem et al. (2017)'s "independent censoring" censoring
+generate_data = function(n, censoring = "light") {
+  z = rbinom(n = n, size = 1, prob = 0.5) # Uncensored covariate
+  x = rweibull(n = n, shape = 0.75 - 0.25 * z, scale = 0.25)  # To-be-censored covariate
+  e = rnorm(n = n, mean = 0, sd = 1) # Random errors
+  y = 1 + 0.5 * x + 0.25 * z + e # Continuous outcome
+  q = ifelse(test = censoring == "light", 
+             yes = 0.5, ## ~ 12%
+             no = ifelse(test = censoring == "heavy", 
+                         yes = 2.9, ## ~ 41%
+                         no = 20) ## ~ 78%
+  ) # Rate parameter for censoring
+  c = rexp(n = n, rate = q) # Random censoring mechanism
+  w = pmin(x, c) # Observed covariate value
+  d = as.numeric(x <= c) # "Event" indicator
+  dat = data.frame(x, z, w, y, d) # Construct data set
+  return(dat)
+}
+
+# Set the number of replicates per setting
+reps = 1000
+
+# Choose seed 
+sim_seed = 114
+
+# Loop over different censoring rates: light, heavy, extra heavy
+for (censoring in c("light", "heavy", "extra_heavy")) {
+  # And different sample sizes n = 100, 500, 1000, 2000
+  for (n in c(100, 500, 1000, 2000)){
+    # For reproducibility
+    set.seed(sim_seed) 
+    
+    # Create dataframe to save results for setting
+    sett_res = data.frame(sim = paste(sim_seed, 1:reps, sep = "-"), censoring, n, perc_censored = NA, 
+                          true_alpha = 1, true_beta = 0.5, true_gamma = 0.25, 
+                          est_alpha = NA, est_beta = NA, est_gamma = NA, 
+                          se_alpha = NA, se_beta = NA, se_gamma = NA
+    )
+    
+    # Loop over replicates 
+    for (r in 1:reps) {
+      # Generate data
+      dat = generate_data(n = n, 
+                          censoring = censoring)
+      
+      # Save % censored
+      sett_res$perc_censored[r] = 1 - mean(dat$d)
+      
+      # Method 1: Full cohort analysis
+      fit_naive = lm(y ~ w + z, data = dat)
+      sett_res[r, c("est_alpha", "est_beta", "est_gamma")] <- fit_naive$coefficients
+      sett_res[r, c("se_alpha", "se_beta", "se_gamma")] <- sqrt(diag(vcov(fit_naive)))
+      
+      # Save results
+      write.csv(x = sett_res, 
+                file = paste0("~/Downloads/naive/right-random/XdepZ/", censoring, "_n", n, "_seed", sim_seed, ".csv"), 
+                row.names = F)
+    }
+  }
+}
+```
+
+```{r, fig.width = 12, fig.height = 8, echo = FALSE}
+f = paste0("~/Downloads/naive/right-random/XdepZ/", list.files("~/Downloads/naive/right-random/XdepZ/"))
+d = do.call(rbind, 
+            lapply(X = f, FUN = read.csv))
+
+# Check censoring rates 
+d |> 
+  group_by(censoring) |> 
+  summarize(perc_censored = mean(perc_censored))
+
+plot_dep = d |> 
+  make_boxplot() 
+plot_dep
+#ggsave(filename = "random-right-XdepZ-naive-bias", device = "png", width = 12, height = 8, units = "in")
+```
+
+### Comments 
+
+  -   When $X \perp Z$ (plot **A**), the naive analysis sees bias in estimating the intercept $\hat{\alpha}$ and coefficient $\hat{\beta}$ on censored $X$. Bias was mostly positive, leading to overestimates of these parameters, on average. This bias, as expected, worsens as the censoring rate increases, and was not seen to improve with increasing sample size. However, the $\hat{\gamma}$ on uncensored $Z$ seemed unaffected. 
+  
+  -   When $X | Z$ (plot **B**), the naive analysis sees (upward) bias in estimating all parameters (even the one on uncensored $Z$). Patterns for increasing censoring rates or sample sizes (i.e., leading to increasing or unchanged bias, respectively) are the same as for $X \perp Z$ above. 
+
+```{r naive-right-random, fig.width = 12, fig.height = 12, echo = F}
+ggpubr::ggarrange(plot_indep, plot_dep, common.legend = TRUE, 
+                  nrow = 2, labels = c("A", "B"))
+```
+
+## Left random censoring {.tabset}
+
+### $X \perp Z$ 
+
+Simulate 1000 datasets each for samples of $n = 100, 500, 1000, 2000$ observations under light (12\%), heavy (~40%), and extra heavy (~78%) censoring. Specifically, 
+
+  -   $Z \sim \textrm{Bernoulli}(0.5)$,
+  -   $X | Z = Z \sim \textrm{Weibull}(0.75, 0.25)$,
+  -   $Y = 1 + 0.5X + 0.25Z + \epsilon$ (for $\epsilon \sim \textrm{N}(0, 1)$),
+  -   $C \sim \textrm{Expo}(q)$ (for $q = 40$ for light, $q = 7$ for heavy, and $q = 1$ for extra heavy), 
+  -   $W = \max(X, C)$, and 
+  -   $\Delta = \textrm{I}(X \geq C)$. 
+
+```{r, eval = F}
+# Data generation function based on Atem et al. (2017)'s "independent censoring" censoring
+generate_data = function(n, censoring = "light") {
+  z = rbinom(n = n, size = 1, prob = 0.5) # Uncensored covariate
+  x = rweibull(n = n, shape = 0.75, scale = 0.25)  # To-be-censored covariate
+  e = rnorm(n = n, mean = 0, sd = 1) # Random errors
+  y = 1 + 0.5 * x + 0.25 * z + e # Continuous outcome
+  q = ifelse(test = censoring == "light", 
+             yes = 40, ## ~ 12%
+             no = ifelse(test = censoring == "heavy", 
+                         yes = 7, ## ~ 41%
+                         no = 1) ## ~ 78%
+  ) # Rate parameter for censoring
+  c = rexp(n = n, rate = q) # Random censoring mechanism
+  w = pmax(x, c) # Observed covariate value
+  d = as.numeric(x >= c) # "Event" indicator
+  dat = data.frame(x, z, w, y, d) # Construct data set
+  return(dat)
+}
+
+# Set the number of replicates per setting
+reps = 1000
+
+# Choose seed 
+sim_seed = 114
+
+# Loop over different censoring rates: light, heavy, extra heavy
+for (censoring in c("light", "heavy", "extra_heavy")) {
+  # And different sample sizes n = 100, 500, 1000, 2000
+  for (n in c(100, 500, 1000, 2000)){
+    # For reproducibility
+    set.seed(sim_seed) 
+    
+    # Create dataframe to save results for setting
+    sett_res = data.frame(sim = paste(sim_seed, 1:reps, sep = "-"), censoring, n, perc_censored = NA, 
+                          true_alpha = 1, true_beta = 0.5, true_gamma = 0.25, 
+                          est_alpha = NA, est_beta = NA, est_gamma = NA, 
+                          se_alpha = NA, se_beta = NA, se_gamma = NA
+    )
+    
+    # Loop over replicates 
+    for (r in 1:reps) {
+      # Generate data
+      dat = generate_data(n = n, 
+                          censoring = censoring)
+      
+      # Save % censored
+      sett_res$perc_censored[r] = 1 - mean(dat$d)
+      
+      # Method 1: Full cohort analysis
+      fit_naive = lm(y ~ w + z, data = dat)
+      sett_res[r, c("est_alpha", "est_beta", "est_gamma")] <- fit_naive$coefficients
+      sett_res[r, c("se_alpha", "se_beta", "se_gamma")] <- sqrt(diag(vcov(fit_naive)))
+      
+      # Save results
+      write.csv(x = sett_res, 
+                file = paste0("~/Downloads/naive/left-random/XindepZ/", censoring, "_n", n, "_seed", sim_seed, ".csv"), 
+                row.names = F)
+    }
+  }
+}
+```
+
+```{r, fig.width = 12, fig.height = 8, echo = FALSE}
+f = paste0("~/Downloads/naive/left-random/XindepZ/", list.files("~/Downloads/naive/left-random/XindepZ/"))
+d = do.call(rbind, 
+            lapply(X = f, FUN = read.csv))
+
+# Check censoring rates 
+d |> 
+  group_by(censoring) |> 
+  summarize(perc_censored = mean(perc_censored))
+
+plot_indep = d |> 
+  make_boxplot()
+plot_indep
+#ggsave(filename = "left-random-naive-bias", device = "png", width = 12, height = 8, units = "in")
+```
+
+### $X | Z$ 
+
+As with $X \perp Z$, except that $X | Z \sim \textrm{Weibull}(0.75 - 0.25Z, 0.25)$. 
+
+```{r, eval = F}
+# Data generation function based on Atem et al. (2017)'s "independent censoring" censoring
+generate_data = function(n, censoring = "light") {
+  z = rbinom(n = n, size = 1, prob = 0.5) # Uncensored covariate
+  x = rweibull(n = n, shape = 0.75 - 0.25 * z, scale = 0.25)  # To-be-censored covariate
+  e = rnorm(n = n, mean = 0, sd = 1) # Random errors
+  y = 1 + 0.5 * x + 0.25 * z + e # Continuous outcome
+  q = ifelse(test = censoring == "light", 
+             yes = 40, ## ~ 12%
+             no = ifelse(test = censoring == "heavy", 
+                         yes = 7, ## ~ 41%
+                         no = 1) ## ~ 78%
+  ) # Rate parameter for censoring
+  c = rexp(n = n, rate = q) # Random censoring mechanism
+  w = pmax(x, c) # Observed covariate value
+  d = as.numeric(x >= c) # "Event" indicator
+  dat = data.frame(x, z, w, y, d) # Construct data set
+  return(dat)
+}
+
+# Set the number of replicates per setting
+reps = 1000
+
+# Choose seed 
+sim_seed = 114
+
+# Loop over different censoring rates: light, heavy, extra heavy
+for (censoring in c("light", "heavy", "extra_heavy")) {
+  # And different sample sizes n = 100, 500, 1000, 2000
+  for (n in c(100, 500, 1000, 2000)){
+    # For reproducibility
+    set.seed(sim_seed) 
+    
+    # Create dataframe to save results for setting
+    sett_res = data.frame(sim = paste(sim_seed, 1:reps, sep = "-"), censoring, n, perc_censored = NA, 
+                          true_alpha = 1, true_beta = 0.5, true_gamma = 0.25, 
+                          est_alpha = NA, est_beta = NA, est_gamma = NA, 
+                          se_alpha = NA, se_beta = NA, se_gamma = NA
+    )
+    
+    # Loop over replicates 
+    for (r in 1:reps) {
+      # Generate data
+      dat = generate_data(n = n, 
+                          censoring = censoring)
+      
+      # Save % censored
+      sett_res$perc_censored[r] = 1 - mean(dat$d)
+      
+      # Method 1: Full cohort analysis
+      fit_naive = lm(y ~ w + z, data = dat)
+      sett_res[r, c("est_alpha", "est_beta", "est_gamma")] <- fit_naive$coefficients
+      sett_res[r, c("se_alpha", "se_beta", "se_gamma")] <- sqrt(diag(vcov(fit_naive)))
+      
+      # Save results
+      write.csv(x = sett_res, 
+                file = paste0("~/Downloads/naive/left-random/XdepZ/", censoring, "_n", n, "_seed", sim_seed, ".csv"), 
+                row.names = F)
+    }
+  }
+}
+```
+
+```{r, fig.width = 12, fig.height = 8, echo = FALSE}
+f = paste0("~/Downloads/naive/left-random/XdepZ/", list.files("~/Downloads/naive/left-random/XdepZ/"))
+d = do.call(rbind, 
+            lapply(X = f, FUN = read.csv))
+
+# Check censoring rates 
+d |> 
+  group_by(censoring) |> 
+  summarize(perc_censored = mean(perc_censored))
+
+plot_dep = d |> 
+  make_boxplot()
+plot_dep
+#ggsave(filename = "left-random-naive-bias", device = "png", width = 12, height = 8, units = "in")
+```
+
+### Comments 
+
+  -   When $X \perp Z$ (plot **A**), the naive analysis sees bias in estimating the intercept $\hat{\alpha}$ and coefficient $\hat{\beta}$ on censored $X$. However, bias in $\hat{\beta}$ did not become severe until extra heavy censoring. There was no consistent directionality for the bias. For example, $\hat{\alpha}$ was downwardly biased under heavy censoring and then upwardly biased under extra heavy censoring. Still, the magnitude of the bias worsened as the censoring rate increased and was unchanged by sample size. However, the $\hat{\gamma}$ on uncensored $Z$ seemed unaffected. 
+  
+  -   When $X | Z$ (plot **B**), the naive analysis sees bias in estimating all parameters (even the one on uncensored $Z$). Patterns for increasing censoring rates or sample sizes (i.e., leading to higher-magnitude or unchanged bias, respectively) are the same as for $X \perp Z$ above. 
+
+```{r naive-left-random, fig.width = 12, fig.height = 12, echo = F}
+ggpubr::ggarrange(plot_indep, plot_dep, common.legend = TRUE, 
+                  nrow = 2, labels = c("A", "B"))
+```
+
+## Right LOD censoring {.tabset}
+
+### $X \perp Z$ 
+
+Simulate 1000 datasets each for samples of $n = 100, 500, 1000, 2000$ observations under light (12\%), heavy (~40%), and extra heavy (~78%) censoring. Specifically, 
+
+  -   $Z \sim \textrm{Bernoulli}(0.5)$,
+  -   $X | Z = X \sim \textrm{Weibull}(0.75, 0.25)$,
+  -   $Y = 1 + 0.5X + 0.25Z + \epsilon$ (for $\epsilon \sim \textrm{N}(0, 1)$),
+  -   $C \sim \textrm{Expo}(q)$ (for $q = 0.68$ for light, $q = 0.22$ for heavy, and $q = 0.04$ for extra heavy), 
+  -   $W = \min(X, C)$, and 
+  -   $\Delta = \textrm{I}(X \leq C)$. 
+
+```{r, eval = F}
+# Data generation function based on Atem et al. (2017)'s "independent censoring" censoring
+generate_data = function(n, censoring = "light") {
+  z = rbinom(n = n, size = 1, prob = 0.5) # Uncensored covariate
+  x = rweibull(n = n, shape = 0.75, scale = 0.25)  # To-be-censored covariate
+  e = rnorm(n = n, mean = 0, sd = 1) # Random errors
+  y = 1 + 0.5 * x + 0.25 * z + e # Continuous outcome
+  c = qweibull(p = ifelse(test = censoring == "light", 
+                          yes = 0.12, 
+                          no = ifelse(test = censoring == "heavy", 
+                                      yes = 0.4, 
+                                      no = 0.78)), 
+               shape = 0.75, scale = 0.25, 
+               lower.tail = FALSE) # LOD censoring mechanism
+  w = pmin(x, c) # Observed covariate value
+  d = as.numeric(x <= c) # "Event" indicator
+  dat = data.frame(x, z, w, y, d) # Construct data set
+  return(dat)
+}
+
+# Set the number of replicates per setting
+reps = 1000
+
+# Choose seed 
+sim_seed = 114
+
+# Loop over different censoring rates: light, heavy, extra heavy
+for (censoring in c("light", "heavy", "extra_heavy")) {
+  # And different sample sizes n = 100, 500, 1000, 2000
+  for (n in c(100, 500, 1000, 2000)){
+    # For reproducibility
+    set.seed(sim_seed) 
+    
+    # Create dataframe to save results for setting
+    sett_res = data.frame(sim = paste(sim_seed, 1:reps, sep = "-"), censoring, n, perc_censored = NA, 
+                          true_alpha = 1, true_beta = 0.5, true_gamma = 0.25, 
+                          est_alpha = NA, est_beta = NA, est_gamma = NA, 
+                          se_alpha = NA, se_beta = NA, se_gamma = NA
+    )
+    
+    # Loop over replicates 
+    for (r in 1:reps) {
+      # Generate data
+      dat = generate_data(n = n, 
+                          censoring = censoring)
+      
+      # Save % censored
+      sett_res$perc_censored[r] = 1 - mean(dat$d)
+      
+      # Method 1: Full cohort analysis
+      fit_naive = lm(y ~ w + z, data = dat)
+      sett_res[r, c("est_alpha", "est_beta", "est_gamma")] <- fit_naive$coefficients
+      sett_res[r, c("se_alpha", "se_beta", "se_gamma")] <- sqrt(diag(vcov(fit_naive)))
+      
+      # Save results
+      write.csv(x = sett_res, 
+                file = paste0("~/Downloads/naive/right-lod/XindepZ/", censoring, "_n", n, "_seed", sim_seed, ".csv"), 
+                row.names = F)
+    }
+  }
+}
+```
+
+```{r, fig.width = 12, fig.height = 8, echo = FALSE}
+f = paste0("~/Downloads/naive/right-lod/XindepZ/", list.files("~/Downloads/naive/right-lod/XindepZ/"))
+d = do.call(rbind, 
+            lapply(X = f, FUN = read.csv))
+
+# Check censoring rates 
+d |> 
+  group_by(censoring) |> 
+  summarize(perc_censored = mean(perc_censored))
+
+plot_indep = d |> 
+  make_boxplot()
+plot_indep
+#ggsave(filename = "right-lod-naive-bias", device = "png", width = 12, height = 8, units = "in")
+```
+
+### $X | Z$ 
+
+As with $X \perp Z$, except that $X | Z \sim \textrm{Weibull}(0.75 - 0.25Z, 0.25)$. 
+
+```{r, eval = F}
+# Data generation function based on Atem et al. (2017)'s "independent censoring" censoring
+generate_data = function(n, censoring = "light") {
+  z = rbinom(n = n, size = 1, prob = 0.5) # Uncensored covariate
+  x = rweibull(n = n, shape = 0.75 - 0.25 * z, scale = 0.25)  # To-be-censored covariate
+  e = rnorm(n = n, mean = 0, sd = 1) # Random errors
+  y = 1 + 0.5 * x + 0.25 * z + e # Continuous outcome
+  c = qweibull(p = ifelse(test = censoring == "light", 
+                          yes = 0.12, 
+                          no = ifelse(test = censoring == "heavy", 
+                                      yes = 0.4, 
+                                      no = 0.78)), 
+               shape = 0.75, scale = 0.25, 
+               lower.tail = FALSE) # LOD censoring mechanism
+  w = pmin(x, c) # Observed covariate value
+  d = as.numeric(x <= c) # "Event" indicator
+  dat = data.frame(x, z, w, y, d) # Construct data set
+  return(dat)
+}
+
+# Set the number of replicates per setting
+reps = 1000
+
+# Choose seed 
+sim_seed = 114
+
+# Loop over different censoring rates: light, heavy, extra heavy
+for (censoring in c("light", "heavy", "extra_heavy")) {
+  # And different sample sizes n = 100, 500, 1000, 2000
+  for (n in c(100, 500, 1000, 2000)){
+    # For reproducibility
+    set.seed(sim_seed) 
+    
+    # Create dataframe to save results for setting
+    sett_res = data.frame(sim = paste(sim_seed, 1:reps, sep = "-"), censoring, n, perc_censored = NA, 
+                          true_alpha = 1, true_beta = 0.5, true_gamma = 0.25, 
+                          est_alpha = NA, est_beta = NA, est_gamma = NA, 
+                          se_alpha = NA, se_beta = NA, se_gamma = NA
+    )
+    
+    # Loop over replicates 
+    for (r in 1:reps) {
+      # Generate data
+      dat = generate_data(n = n, 
+                          censoring = censoring)
+      
+      # Save % censored
+      sett_res$perc_censored[r] = 1 - mean(dat$d)
+      
+      # Method 1: Full cohort analysis
+      fit_naive = lm(y ~ w + z, data = dat)
+      sett_res[r, c("est_alpha", "est_beta", "est_gamma")] <- fit_naive$coefficients
+      sett_res[r, c("se_alpha", "se_beta", "se_gamma")] <- sqrt(diag(vcov(fit_naive)))
+      
+      # Save results
+      write.csv(x = sett_res, 
+                file = paste0("~/Downloads/naive/right-lod/XdepZ/", censoring, "_n", n, "_seed", sim_seed, ".csv"), 
+                row.names = F)
+    }
+  }
+}
+```
+
+```{r, fig.width = 12, fig.height = 8, echo = FALSE}
+f = paste0("~/Downloads/naive/right-lod/XdepZ/", list.files("~/Downloads/naive/right-lod/XdepZ/"))
+d = do.call(rbind, 
+            lapply(X = f, FUN = read.csv))
+
+# Check censoring rates 
+d |> 
+  group_by(censoring) |> 
+  summarize(perc_censored = mean(perc_censored))
+
+plot_dep = d |> 
+  make_boxplot()
+plot_dep
+#ggsave(filename = "right-lod-naive-bias", device = "png", width = 12, height = 8, units = "in")
+```
+
+### Comments 
+
+  -   When $X \perp Z$ (plot **A**), the naive analysis sees bias in estimating the intercept $\hat{\alpha}$ and coefficient $\hat{\beta}$ on censored $X$. There was upward bias in $\hat{\beta}$ and downward bias in $\hat{\alpha}$. The magnitude of the bias in either parameter worsened as the censoring rate increased and was unchanged by sample size. However, the $\hat{\gamma}$ on uncensored $Z$ seemed unaffected. 
+  
+  -   When $X | Z$ (plot **B**), the naive analysis sees bias in estimating all parameters (even the one on uncensored $Z$). Patterns for increasing censoring rates or sample sizes (i.e., leading to higher-magnitude or unchanged bias, respectively) were the same as for $X \perp Z$ above. There was upward bias in $\hat{\beta}$ **and** $\hat{\gamma}$, and downward bias in $\hat{\alpha}$.
+
+```{r naive-right-lod, fig.width = 12, fig.height = 12, echo = F}
+ggpubr::ggarrange(plot_indep, plot_dep, common.legend = TRUE, 
+                  nrow = 2, labels = c("A", "B"))
+```
+
+## Left LOD censoring {.tabset}
+
+### $X \perp Z$ 
+
+Simulate 1000 datasets each for samples of $n = 100, 500, 1000, 2000$ observations under light (12\%), heavy (~40%), and extra heavy (~78%) censoring. Specifically, 
+
+  -   $Z \sim \textrm{Bernoulli}(0.5)$,
+  -   $X | Z = X \sim \textrm{Weibull}(0.75, 0.25)$,
+  -   $Y = 1 + 0.5X + 0.25Z + \epsilon$ (for $\epsilon \sim \textrm{N}(0, 1)$),
+  -   $C \sim \textrm{Expo}(q)$ (for $q = 0.02$ for light, $q = 0.10$ for heavy, and $q = 0.43$ for extra heavy), 
+  -   $W = \min(X, C)$, and 
+  -   $\Delta = \textrm{I}(X \leq C)$. 
+
+```{r, eval = F}
+# Data generation function based on Atem et al. (2017)'s "independent censoring" censoring
+generate_data = function(n, censoring = "light") {
+  z = rbinom(n = n, size = 1, prob = 0.5) # Uncensored covariate
+  x = rweibull(n = n, shape = 0.75, scale = 0.25)  # To-be-censored covariate
+  e = rnorm(n = n, mean = 0, sd = 1) # Random errors
+  y = 1 + 0.5 * x + 0.25 * z + e # Continuous outcome
+  c = qweibull(p = ifelse(test = censoring == "light", 
+                          yes = 0.12, 
+                          no = ifelse(test = censoring == "heavy", 
+                                      yes = 0.40, 
+                                      no = 0.78)), 
+               shape = 0.75, scale = 0.25) # LOD censoring mechanism
+  w = pmax(x, c) # Observed covariate value
+  d = as.numeric(x >= c) # "Event" indicator
+  dat = data.frame(x, z, w, y, d) # Construct data set
+  return(dat)
+}
+
+# Set the number of replicates per setting
+reps = 1000
+
+# Choose seed 
+sim_seed = 114
+
+# Loop over different censoring rates: light, heavy, extra heavy
+for (censoring in c("light", "heavy", "extra_heavy")) {
+  # And different sample sizes n = 100, 500, 1000, 2000
+  for (n in c(100, 500, 1000, 2000)){
+    # For reproducibility
+    set.seed(sim_seed) 
+    
+    # Create dataframe to save results for setting
+    sett_res = data.frame(sim = paste(sim_seed, 1:reps, sep = "-"), censoring, n, perc_censored = NA, 
+                          true_alpha = 1, true_beta = 0.5, true_gamma = 0.25, 
+                          est_alpha = NA, est_beta = NA, est_gamma = NA, 
+                          se_alpha = NA, se_beta = NA, se_gamma = NA
+    )
+    
+    # Loop over replicates 
+    for (r in 1:reps) {
+      # Generate data
+      dat = generate_data(n = n, 
+                          censoring = censoring)
+      
+      # Save % censored
+      sett_res$perc_censored[r] = 1 - mean(dat$d)
+      
+      # Method 1: Full cohort analysis
+      fit_naive = lm(y ~ w + z, data = dat)
+      sett_res[r, c("est_alpha", "est_beta", "est_gamma")] <- fit_naive$coefficients
+      sett_res[r, c("se_alpha", "se_beta", "se_gamma")] <- sqrt(diag(vcov(fit_naive)))
+      
+      # Save results
+      write.csv(x = sett_res, 
+                file = paste0("~/Downloads/naive/left-lod/XindepZ/", censoring, "_n", n, "_seed", sim_seed, ".csv"), 
+                row.names = F)
+    }
+  }
+}
+```
+
+```{r, fig.width = 12, fig.height = 8, echo = FALSE}
+f = paste0("~/Downloads/naive/left-lod/XindepZ/", list.files("~/Downloads/naive/left-lod/XindepZ/"))
+d = do.call(rbind, 
+            lapply(X = f, FUN = read.csv))
+
+# Check censoring rates 
+d |> 
+  group_by(censoring) |> 
+  summarize(perc_censored = mean(perc_censored))
+
+plot_indep = d |> 
+  make_boxplot()
+plot_indep 
+```
+
+### $X | Z$ 
+
+As with $X \perp Z$, except that $X | Z \sim \textrm{Weibull}(0.75 - 0.25Z, 0.25)$. 
+
+```{r, eval = F}
+# Data generation function based on Atem et al. (2017)'s "independent censoring" censoring
+generate_data = function(n, censoring = "light") {
+  z = rbinom(n = n, size = 1, prob = 0.5) # Uncensored covariate
+  x = rweibull(n = n, shape = 0.75 - 0.25 * z, scale = 0.25)  # To-be-censored covariate
+  e = rnorm(n = n, mean = 0, sd = 1) # Random errors
+  y = 1 + 0.5 * x + 0.25 * z + e # Continuous outcome
+  c = qweibull(p = ifelse(test = censoring == "light", 
+                          yes = 0.12, 
+                          no = ifelse(test = censoring == "heavy", 
+                                      yes = 0.40, 
+                                      no = 0.78)), 
+               shape = 0.75, scale = 0.25) # LOD censoring mechanism
+  w = pmax(x, c) # Observed covariate value
+  d = as.numeric(x >= c) # "Event" indicator
+  dat = data.frame(x, z, w, y, d) # Construct data set
+  return(dat)
+}
+
+# Set the number of replicates per setting
+reps = 1000
+
+# Choose seed 
+sim_seed = 114
+
+# Loop over different censoring rates: light, heavy, extra heavy
+for (censoring in c("light", "heavy", "extra_heavy")) {
+  # And different sample sizes n = 100, 500, 1000, 2000
+  for (n in c(100, 500, 1000, 2000)){
+    # For reproducibility
+    set.seed(sim_seed) 
+    
+    # Create dataframe to save results for setting
+    sett_res = data.frame(sim = paste(sim_seed, 1:reps, sep = "-"), censoring, n, perc_censored = NA, 
+                          true_alpha = 1, true_beta = 0.5, true_gamma = 0.25, 
+                          est_alpha = NA, est_beta = NA, est_gamma = NA, 
+                          se_alpha = NA, se_beta = NA, se_gamma = NA
+    )
+    
+    # Loop over replicates 
+    for (r in 1:reps) {
+      # Generate data
+      dat = generate_data(n = n, 
+                          censoring = censoring)
+      
+      # Save % censored
+      sett_res$perc_censored[r] = 1 - mean(dat$d)
+      
+      # Method 1: Full cohort analysis
+      fit_naive = lm(y ~ w + z, data = dat)
+      sett_res[r, c("est_alpha", "est_beta", "est_gamma")] <- fit_naive$coefficients
+      sett_res[r, c("se_alpha", "se_beta", "se_gamma")] <- sqrt(diag(vcov(fit_naive)))
+      
+      # Save results
+      write.csv(x = sett_res, 
+                file = paste0("~/Downloads/naive/left-lod/XdepZ/", censoring, "_n", n, "_seed", sim_seed, ".csv"), 
+                row.names = F)
+    }
+  }
+}
+```
+
+```{r, fig.width = 12, fig.height = 8, echo = FALSE}
+f = paste0("~/Downloads/naive/left-lod/XdepZ/", list.files("~/Downloads/naive/left-lod/XdepZ/"))
+d = do.call(rbind, 
+            lapply(X = f, FUN = read.csv))
+
+# Check censoring rates 
+d |> 
+  group_by(censoring) |> 
+  summarize(perc_censored = mean(perc_censored))
+
+plot_dep = d |> 
+  make_boxplot()
+plot_dep
+#ggsave(filename = "right-lod-naive-bias", device = "png", width = 12, height = 8, units = "in")
+```
+
+### Comments 
+
+  -   When $X \perp Z$ (plot **A**), the naive analysis sees bias in estimating the intercept $\hat{\alpha}$ and coefficient $\hat{\beta}$ on censored $X$. There was upward bias in $\hat{\beta}$ and downward bias in $\hat{\alpha}$. The magnitude of the bias in either parameter worsened as the censoring rate increased and was unchanged by sample size. However, the $\hat{\gamma}$ on uncensored $Z$ seemed unaffected. 
+  
+  -   When $X | Z$ (plot **B**), the naive analysis sees bias in estimating all parameters (even the one on uncensored $Z$), but the bias in $\hat{\gamma}$ was slight. Patterns for increasing censoring rates or sample sizes (i.e., leading to higher-magnitude or unchanged bias, respectively) were the same as for $X \perp Z$ above. There was upward bias in $\hat{\beta}$, and downward bias in $\hat{\alpha}$ **and** $\hat{\gamma}$.
+
+```{r naive-left-lod, fig.width = 12, fig.height = 12, echo = F}
+ggpubr::ggarrange(plot_indep, plot_dep, common.legend = TRUE, 
+                  nrow = 2, labels = c("A", "B"))
+```
+
+
+# Bias {.tabset}
+
+## Right random censoring {.tabset}
+
+### $X \perp Z (\beta = 0)$ 
+
+Simulate 1000 datasets each for samples of $n = 100, 500, 1000, 2000$ observations under light (12\%), heavy (~40%), and extra heavy (~78%) censoring. Specifically, 
+
+  -   $Z \sim \textrm{Bernoulli}(0.5)$,
+  -   $X | Z = X \sim \textrm{Weibull}(0.75, 0.25)$,
+  -   $Y = 1 + 0.5X + 0.25Z + \epsilon$ (for $\epsilon \sim \textrm{N}(0, 1)$),
+  -   $C \sim \textrm{Expo}(q)$ (for $q = 0.5$ for light, $q = 2.9$ for heavy, and $q = 20$ for extra heavy), 
+  -   $W = \min(X, C)$, and 
+  -   $\Delta = \textrm{I}(X \leq C)$. 
+
+```{r, eval = F}
+# Data generation function based on Atem et al. (2017)'s "independent censoring" censoring
+generate_data = function(n, censoring = "light") {
+  z = rbinom(n = n, size = 1, prob = 0.5) # Uncensored covariate
+  x = rweibull(n = n, shape = 0.75, scale = 0.25)  # To-be-censored covariate
+  e = rnorm(n = n, mean = 0, sd = 1) # Random errors
+  y = 1 + 0 * x + 0.25 * z + e # Continuous outcome
+  q = ifelse(test = censoring == "light", 
+             yes = 0.5, ## ~ 12%
+             no = ifelse(test = censoring == "heavy", 
+                         yes = 2.9, ## ~ 41%
+                         no = 20) ## ~ 78%
+  ) # Rate parameter for censoring
+  c = rexp(n = n, rate = q) # Random censoring mechanism
+  w = pmin(x, c) # Observed covariate value
+  d = as.numeric(x <= c) # "Event" indicator
+  dat = data.frame(x, z, w, y, d) # Construct data set
+  return(dat)
+}
+
+# Set the number of replicates per setting
+reps = 1000
+
+# Choose seed 
+sim_seed = 114
+
+# Loop over different censoring rates: light, heavy, extra heavy
+for (censoring in c("light", "heavy", "extra_heavy")) {
+  # And different sample sizes n = 100, 500, 1000, 2000
+  for (n in c(100, 500, 1000, 2000)){
+    # For reproducibility
+    set.seed(sim_seed) 
+    
+    # Create dataframe to save results for setting
+    sett_res = data.frame(sim = paste(sim_seed, 1:reps, sep = "-"), censoring, n, perc_censored = NA, 
+                          true_alpha = 1, true_beta = 0.5, true_gamma = 0.25, 
+                          est_alpha = NA, est_beta = NA, est_gamma = NA, 
+                          se_alpha = NA, se_beta = NA, se_gamma = NA
+    )
+    
+    # Loop over replicates 
+    for (r in 1:reps) {
+      # Generate data
+      dat = generate_data(n = n, 
+                          censoring = censoring)
+      
+      # Save % censored
+      sett_res$perc_censored[r] = 1 - mean(dat$d)
+      
+      # Method 1: Full cohort analysis
+      fit_naive = lm(y ~ w + z, data = dat)
+      sett_res[r, c("est_alpha", "est_beta", "est_gamma")] <- as.numeric(summary(fit_naive)$coefficients[, 4] < 0.05)
+      
+      # Save results
+      write.csv(x = sett_res, 
+                file = paste0("~/Downloads/naive/right-random/XindepZ/typeIerror_beta1_", censoring, "_n", n, "_seed", sim_seed, ".csv"), 
+                row.names = F)
+    }
+  }
+}
+```
+
+```{r, fig.width = 12, fig.height = 8, echo = FALSE}
+f = paste0("~/Downloads/naive/right-random/XindepZ/", list.files("~/Downloads/naive/right-random/XindepZ/", pattern = "typeIerror_beta1_"))
+d = do.call(rbind, 
+            lapply(X = f, FUN = read.csv))
+
+d |> 
+  group_by(censoring, n) |> 
+  select(starts_with("est")) |> 
+  summarize_all(mean) |> 
+  arrange(desc(est_beta))
+```
+
+### $X \perp Z (\gamma = 0)$ 
+
+Simulate 1000 datasets each for samples of $n = 100, 500, 1000, 2000$ observations under light (12\%), heavy (~40%), and extra heavy (~78%) censoring. Specifically, 
+
+  -   $Z \sim \textrm{Bernoulli}(0.5)$,
+  -   $X | Z = X \sim \textrm{Weibull}(0.75, 0.25)$,
+  -   $Y = 1 + 0.5X + 0.25Z + \epsilon$ (for $\epsilon \sim \textrm{N}(0, 1)$),
+  -   $C \sim \textrm{Expo}(q)$ (for $q = 0.5$ for light, $q = 2.9$ for heavy, and $q = 20$ for extra heavy), 
+  -   $W = \min(X, C)$, and 
+  -   $\Delta = \textrm{I}(X \leq C)$. 
+
+```{r, eval = F}
+# Data generation function based on Atem et al. (2017)'s "independent censoring" censoring
+generate_data = function(n, censoring = "light") {
+  z = rbinom(n = n, size = 1, prob = 0.5) # Uncensored covariate
+  x = rweibull(n = n, shape = 0.75, scale = 0.25)  # To-be-censored covariate
+  e = rnorm(n = n, mean = 0, sd = 1) # Random errors
+  y = 1 + 0.5 * x + 0 * z + e # Continuous outcome
+  q = ifelse(test = censoring == "light", 
+             yes = 0.5, ## ~ 12%
+             no = ifelse(test = censoring == "heavy", 
+                         yes = 2.9, ## ~ 41%
+                         no = 20) ## ~ 78%
+  ) # Rate parameter for censoring
+  c = rexp(n = n, rate = q) # Random censoring mechanism
+  w = pmin(x, c) # Observed covariate value
+  d = as.numeric(x <= c) # "Event" indicator
+  dat = data.frame(x, z, w, y, d) # Construct data set
+  return(dat)
+}
+
+# Set the number of replicates per setting
+reps = 1000
+
+# Choose seed 
+sim_seed = 114
+
+# Loop over different censoring rates: light, heavy, extra heavy
+for (censoring in c("light", "heavy", "extra_heavy")) {
+  # And different sample sizes n = 100, 500, 1000, 2000
+  for (n in c(100, 500, 1000, 2000)){
+    # For reproducibility
+    set.seed(sim_seed) 
+    
+    # Create dataframe to save results for setting
+    sett_res = data.frame(sim = paste(sim_seed, 1:reps, sep = "-"), censoring, n, perc_censored = NA, 
+                          true_alpha = 1, true_beta = 0.5, true_gamma = 0.25, 
+                          est_alpha = NA, est_beta = NA, est_gamma = NA, 
+                          se_alpha = NA, se_beta = NA, se_gamma = NA
+    )
+    
+    # Loop over replicates 
+    for (r in 1:reps) {
+      # Generate data
+      dat = generate_data(n = n, 
+                          censoring = censoring)
+      
+      # Save % censored
+      sett_res$perc_censored[r] = 1 - mean(dat$d)
+      
+      # Method 1: Full cohort analysis
+      fit_naive = lm(y ~ w + z, data = dat)
+      sett_res[r, c("est_alpha", "est_beta", "est_gamma")] <- as.numeric(summary(fit_naive)$coefficients[, 4] < 0.05)
+      
+      # Save results
+      write.csv(x = sett_res, 
+                file = paste0("~/Downloads/naive/right-random/XindepZ/typeIerror_beta2_", censoring, "_n", n, "_seed", sim_seed, ".csv"), 
+                row.names = F)
+    }
+  }
+}
+```
+
+```{r, fig.width = 12, fig.height = 8, echo = FALSE}
+f = paste0("~/Downloads/naive/right-random/XindepZ/", list.files("~/Downloads/naive/right-random/XindepZ/", pattern = "typeIerror_beta2_"))
+d = do.call(rbind, 
+            lapply(X = f, FUN = read.csv))
+
+d |> 
+  group_by(censoring, n) |> 
+  select(starts_with("est")) |> 
+  summarize_all(mean) |> 
+  arrange(desc(est_gamma))
+```
+
+### $X | Z (\beta = 0)$
+
+As with $X \perp Z$, except that $X | Z \sim \textrm{Weibull}(0.75 - 0.25Z, 0.25)$. 
+
+```{r, eval = F}
+# Data generation function based on Atem et al. (2017)'s "independent censoring" censoring
+generate_data = function(n, censoring = "light") {
+  z = rbinom(n = n, size = 1, prob = 0.5) # Uncensored covariate
+  x = rweibull(n = n, shape = 0.75 - 0.25 * z, scale = 0.25)  # To-be-censored covariate
+  e = rnorm(n = n, mean = 0, sd = 1) # Random errors
+  y = 1 + 0 * x + 0.25 * z + e # Continuous outcome
+  q = ifelse(test = censoring == "light", 
+             yes = 0.5, ## ~ 12%
+             no = ifelse(test = censoring == "heavy", 
+                         yes = 2.9, ## ~ 41%
+                         no = 20) ## ~ 78%
+  ) # Rate parameter for censoring
+  c = rexp(n = n, rate = q) # Random censoring mechanism
+  w = pmin(x, c) # Observed covariate value
+  d = as.numeric(x <= c) # "Event" indicator
+  dat = data.frame(x, z, w, y, d) # Construct data set
+  return(dat)
+}
+
+# Set the number of replicates per setting
+reps = 1000
+
+# Choose seed 
+sim_seed = 114
+
+# Loop over different censoring rates: light, heavy, extra heavy
+for (censoring in c("light", "heavy", "extra_heavy")) {
+  # And different sample sizes n = 100, 500, 1000, 2000
+  for (n in c(100, 500, 1000, 2000)){
+    # For reproducibility
+    set.seed(sim_seed) 
+    
+    # Create dataframe to save results for setting
+    sett_res = data.frame(sim = paste(sim_seed, 1:reps, sep = "-"), censoring, n, perc_censored = NA, 
+                          true_alpha = 1, true_beta = 0.5, true_gamma = 0.25, 
+                          est_alpha = NA, est_beta = NA, est_gamma = NA, 
+                          se_alpha = NA, se_beta = NA, se_gamma = NA
+    )
+    
+    # Loop over replicates 
+    for (r in 1:reps) {
+      # Generate data
+      dat = generate_data(n = n, 
+                          censoring = censoring)
+      
+      # Save % censored
+      sett_res$perc_censored[r] = 1 - mean(dat$d)
+      
+      # Method 1: Full cohort analysis
+      fit_naive = lm(y ~ w + z, data = dat)
+      sett_res[r, c("est_alpha", "est_beta", "est_gamma")] <- as.numeric(summary(fit_naive)$coefficients[, 4] < 0.05)
+      
+      # Save results
+      write.csv(x = sett_res, 
+                file = paste0("~/Downloads/naive/right-random/XdepZ/typeIerror_beta_", censoring, "_n", n, "_seed", sim_seed, ".csv"), 
+                row.names = F)
+    }
+  }
+}
+```
+
+```{r, fig.width = 12, fig.height = 8, echo = FALSE}
+f = paste0("~/Downloads/naive/right-random/XdepZ/", list.files("~/Downloads/naive/right-random/XdepZ/", pattern = "typeIerror_beta_"))
+d = do.call(rbind, 
+            lapply(X = f, FUN = read.csv))
+
+d |> 
+  group_by(censoring, n) |> 
+  select(starts_with("est")) |> 
+  summarize_all(mean) |> 
+  arrange(desc(est_beta))
+```
+
+### Comments 
+
+  -   When $X \perp Z$ (plot **A**), the naive analysis sees bias in estimating the intercept $\hat{\alpha}$ and coefficient $\hat{\beta}$ on censored $X$. Bias was mostly positive, leading to overestimates of these parameters, on average. This bias, as expected, worsens as the censoring rate increases, and was not seen to improve with increasing sample size. However, the $\hat{\gamma}$ on uncensored $Z$ seemed unaffected. 
+  
+  -   When $X | Z$ (plot **B**), the naive analysis sees (upward) bias in estimating all parameters (even the one on uncensored $Z$). Patterns for increasing censoring rates or sample sizes (i.e., leading to increasing or unchanged bias, respectively) are the same as for $X \perp Z$ above. 
+
+```{r naive-right-random, fig.width = 12, fig.height = 12, echo = F}
+ggpubr::ggarrange(plot_indep, plot_dep, common.legend = TRUE, 
+                  nrow = 2, labels = c("A", "B"))
+```
+
+## Left random censoring {.tabset}
+
+### $X \perp Z$ 
+
+Simulate 1000 datasets each for samples of $n = 100, 500, 1000, 2000$ observations under light (12\%), heavy (~40%), and extra heavy (~78%) censoring. Specifically, 
+
+  -   $Z \sim \textrm{Bernoulli}(0.5)$,
+  -   $X | Z = Z \sim \textrm{Weibull}(0.75, 0.25)$,
+  -   $Y = 1 + 0.5X + 0.25Z + \epsilon$ (for $\epsilon \sim \textrm{N}(0, 1)$),
+  -   $C \sim \textrm{Expo}(q)$ (for $q = 40$ for light, $q = 7$ for heavy, and $q = 1$ for extra heavy), 
+  -   $W = \max(X, C)$, and 
+  -   $\Delta = \textrm{I}(X \geq C)$. 
+
+```{r, eval = F}
+# Data generation function based on Atem et al. (2017)'s "independent censoring" censoring
+generate_data = function(n, censoring = "light") {
+  z = rbinom(n = n, size = 1, prob = 0.5) # Uncensored covariate
+  x = rweibull(n = n, shape = 0.75, scale = 0.25)  # To-be-censored covariate
+  e = rnorm(n = n, mean = 0, sd = 1) # Random errors
+  y = 1 + 0.5 * x + 0.25 * z + e # Continuous outcome
+  q = ifelse(test = censoring == "light", 
+             yes = 40, ## ~ 12%
+             no = ifelse(test = censoring == "heavy", 
+                         yes = 7, ## ~ 41%
+                         no = 1) ## ~ 78%
+  ) # Rate parameter for censoring
+  c = rexp(n = n, rate = q) # Random censoring mechanism
+  w = pmax(x, c) # Observed covariate value
+  d = as.numeric(x >= c) # "Event" indicator
+  dat = data.frame(x, z, w, y, d) # Construct data set
+  return(dat)
+}
+
+# Set the number of replicates per setting
+reps = 1000
+
+# Choose seed 
+sim_seed = 114
+
+# Loop over different censoring rates: light, heavy, extra heavy
+for (censoring in c("light", "heavy", "extra_heavy")) {
+  # And different sample sizes n = 100, 500, 1000, 2000
+  for (n in c(100, 500, 1000, 2000)){
+    # For reproducibility
+    set.seed(sim_seed) 
+    
+    # Create dataframe to save results for setting
+    sett_res = data.frame(sim = paste(sim_seed, 1:reps, sep = "-"), censoring, n, perc_censored = NA, 
+                          true_alpha = 1, true_beta = 0.5, true_gamma = 0.25, 
+                          est_alpha = NA, est_beta = NA, est_gamma = NA, 
+                          se_alpha = NA, se_beta = NA, se_gamma = NA
+    )
+    
+    # Loop over replicates 
+    for (r in 1:reps) {
+      # Generate data
+      dat = generate_data(n = n, 
+                          censoring = censoring)
+      
+      # Save % censored
+      sett_res$perc_censored[r] = 1 - mean(dat$d)
+      
+      # Method 1: Full cohort analysis
+      fit_naive = lm(y ~ w + z, data = dat)
+      sett_res[r, c("est_alpha", "est_beta", "est_gamma")] <- fit_naive$coefficients
+      sett_res[r, c("se_alpha", "se_beta", "se_gamma")] <- sqrt(diag(vcov(fit_naive)))
+      
+      # Save results
+      write.csv(x = sett_res, 
+                file = paste0("~/Downloads/naive/left-random/XindepZ/", censoring, "_n", n, "_seed", sim_seed, ".csv"), 
+                row.names = F)
+    }
+  }
+}
+```
+
+```{r, fig.width = 12, fig.height = 8, echo = FALSE}
+f = paste0("~/Downloads/naive/left-random/XindepZ/", list.files("~/Downloads/naive/left-random/XindepZ/"))
+d = do.call(rbind, 
+            lapply(X = f, FUN = read.csv))
+
+# Check censoring rates 
+d |> 
+  group_by(censoring) |> 
+  summarize(perc_censored = mean(perc_censored))
+
+plot_indep = d |> 
+  make_boxplot()
+plot_indep
+#ggsave(filename = "left-random-naive-bias", device = "png", width = 12, height = 8, units = "in")
+```
+
+### $X | Z$ 
+
+As with $X \perp Z$, except that $X | Z \sim \textrm{Weibull}(0.75 - 0.25Z, 0.25)$. 
+
+```{r, eval = F}
+# Data generation function based on Atem et al. (2017)'s "independent censoring" censoring
+generate_data = function(n, censoring = "light") {
+  z = rbinom(n = n, size = 1, prob = 0.5) # Uncensored covariate
+  x = rweibull(n = n, shape = 0.75 - 0.25 * z, scale = 0.25)  # To-be-censored covariate
+  e = rnorm(n = n, mean = 0, sd = 1) # Random errors
+  y = 1 + 0.5 * x + 0.25 * z + e # Continuous outcome
+  q = ifelse(test = censoring == "light", 
+             yes = 40, ## ~ 12%
+             no = ifelse(test = censoring == "heavy", 
+                         yes = 7, ## ~ 41%
+                         no = 1) ## ~ 78%
+  ) # Rate parameter for censoring
+  c = rexp(n = n, rate = q) # Random censoring mechanism
+  w = pmax(x, c) # Observed covariate value
+  d = as.numeric(x >= c) # "Event" indicator
+  dat = data.frame(x, z, w, y, d) # Construct data set
+  return(dat)
+}
+
+# Set the number of replicates per setting
+reps = 1000
+
+# Choose seed 
+sim_seed = 114
+
+# Loop over different censoring rates: light, heavy, extra heavy
+for (censoring in c("light", "heavy", "extra_heavy")) {
+  # And different sample sizes n = 100, 500, 1000, 2000
+  for (n in c(100, 500, 1000, 2000)){
+    # For reproducibility
+    set.seed(sim_seed) 
+    
+    # Create dataframe to save results for setting
+    sett_res = data.frame(sim = paste(sim_seed, 1:reps, sep = "-"), censoring, n, perc_censored = NA, 
+                          true_alpha = 1, true_beta = 0.5, true_gamma = 0.25, 
+                          est_alpha = NA, est_beta = NA, est_gamma = NA, 
+                          se_alpha = NA, se_beta = NA, se_gamma = NA
+    )
+    
+    # Loop over replicates 
+    for (r in 1:reps) {
+      # Generate data
+      dat = generate_data(n = n, 
+                          censoring = censoring)
+      
+      # Save % censored
+      sett_res$perc_censored[r] = 1 - mean(dat$d)
+      
+      # Method 1: Full cohort analysis
+      fit_naive = lm(y ~ w + z, data = dat)
+      sett_res[r, c("est_alpha", "est_beta", "est_gamma")] <- fit_naive$coefficients
+      sett_res[r, c("se_alpha", "se_beta", "se_gamma")] <- sqrt(diag(vcov(fit_naive)))
+      
+      # Save results
+      write.csv(x = sett_res, 
+                file = paste0("~/Downloads/naive/left-random/XdepZ/", censoring, "_n", n, "_seed", sim_seed, ".csv"), 
+                row.names = F)
+    }
+  }
+}
+```
+
+```{r, fig.width = 12, fig.height = 8, echo = FALSE}
+f = paste0("~/Downloads/naive/left-random/XdepZ/", list.files("~/Downloads/naive/left-random/XdepZ/"))
+d = do.call(rbind, 
+            lapply(X = f, FUN = read.csv))
+
+# Check censoring rates 
+d |> 
+  group_by(censoring) |> 
+  summarize(perc_censored = mean(perc_censored))
+
+plot_dep = d |> 
+  make_boxplot()
+plot_dep
+#ggsave(filename = "left-random-naive-bias", device = "png", width = 12, height = 8, units = "in")
+```
+
+### Comments 
+
+  -   When $X \perp Z$ (plot **A**), the naive analysis sees bias in estimating the intercept $\hat{\alpha}$ and coefficient $\hat{\beta}$ on censored $X$. However, bias in $\hat{\beta}$ did not become severe until extra heavy censoring. There was no consistent directionality for the bias. For example, $\hat{\alpha}$ was downwardly biased under heavy censoring and then upwardly biased under extra heavy censoring. Still, the magnitude of the bias worsened as the censoring rate increased and was unchanged by sample size. However, the $\hat{\gamma}$ on uncensored $Z$ seemed unaffected. 
+  
+  -   When $X | Z$ (plot **B**), the naive analysis sees bias in estimating all parameters (even the one on uncensored $Z$). Patterns for increasing censoring rates or sample sizes (i.e., leading to higher-magnitude or unchanged bias, respectively) are the same as for $X \perp Z$ above. 
+
+```{r naive-left-random, fig.width = 12, fig.height = 12, echo = F}
+ggpubr::ggarrange(plot_indep, plot_dep, common.legend = TRUE, 
+                  nrow = 2, labels = c("A", "B"))
+```
+
+## Right LOD censoring {.tabset}
+
+### $X \perp Z$ 
+
+Simulate 1000 datasets each for samples of $n = 100, 500, 1000, 2000$ observations under light (12\%), heavy (~40%), and extra heavy (~78%) censoring. Specifically, 
+
+  -   $Z \sim \textrm{Bernoulli}(0.5)$,
+  -   $X | Z = X \sim \textrm{Weibull}(0.75, 0.25)$,
+  -   $Y = 1 + 0.5X + 0.25Z + \epsilon$ (for $\epsilon \sim \textrm{N}(0, 1)$),
+  -   $C \sim \textrm{Expo}(q)$ (for $q = 0.68$ for light, $q = 0.22$ for heavy, and $q = 0.04$ for extra heavy), 
+  -   $W = \min(X, C)$, and 
+  -   $\Delta = \textrm{I}(X \leq C)$. 
+
+```{r, eval = F}
+# Data generation function based on Atem et al. (2017)'s "independent censoring" censoring
+generate_data = function(n, censoring = "light") {
+  z = rbinom(n = n, size = 1, prob = 0.5) # Uncensored covariate
+  x = rweibull(n = n, shape = 0.75, scale = 0.25)  # To-be-censored covariate
+  e = rnorm(n = n, mean = 0, sd = 1) # Random errors
+  y = 1 + 0.5 * x + 0.25 * z + e # Continuous outcome
+  c = qweibull(p = ifelse(test = censoring == "light", 
+                          yes = 0.12, 
+                          no = ifelse(test = censoring == "heavy", 
+                                      yes = 0.4, 
+                                      no = 0.78)), 
+               shape = 0.75, scale = 0.25, 
+               lower.tail = FALSE) # LOD censoring mechanism
+  w = pmin(x, c) # Observed covariate value
+  d = as.numeric(x <= c) # "Event" indicator
+  dat = data.frame(x, z, w, y, d) # Construct data set
+  return(dat)
+}
+
+# Set the number of replicates per setting
+reps = 1000
+
+# Choose seed 
+sim_seed = 114
+
+# Loop over different censoring rates: light, heavy, extra heavy
+for (censoring in c("light", "heavy", "extra_heavy")) {
+  # And different sample sizes n = 100, 500, 1000, 2000
+  for (n in c(100, 500, 1000, 2000)){
+    # For reproducibility
+    set.seed(sim_seed) 
+    
+    # Create dataframe to save results for setting
+    sett_res = data.frame(sim = paste(sim_seed, 1:reps, sep = "-"), censoring, n, perc_censored = NA, 
+                          true_alpha = 1, true_beta = 0.5, true_gamma = 0.25, 
+                          est_alpha = NA, est_beta = NA, est_gamma = NA, 
+                          se_alpha = NA, se_beta = NA, se_gamma = NA
+    )
+    
+    # Loop over replicates 
+    for (r in 1:reps) {
+      # Generate data
+      dat = generate_data(n = n, 
+                          censoring = censoring)
+      
+      # Save % censored
+      sett_res$perc_censored[r] = 1 - mean(dat$d)
+      
+      # Method 1: Full cohort analysis
+      fit_naive = lm(y ~ w + z, data = dat)
+      sett_res[r, c("est_alpha", "est_beta", "est_gamma")] <- fit_naive$coefficients
+      sett_res[r, c("se_alpha", "se_beta", "se_gamma")] <- sqrt(diag(vcov(fit_naive)))
+      
+      # Save results
+      write.csv(x = sett_res, 
+                file = paste0("~/Downloads/naive/right-lod/XindepZ/", censoring, "_n", n, "_seed", sim_seed, ".csv"), 
+                row.names = F)
+    }
+  }
+}
+```
+
+```{r, fig.width = 12, fig.height = 8, echo = FALSE}
+f = paste0("~/Downloads/naive/right-lod/XindepZ/", list.files("~/Downloads/naive/right-lod/XindepZ/"))
+d = do.call(rbind, 
+            lapply(X = f, FUN = read.csv))
+
+# Check censoring rates 
+d |> 
+  group_by(censoring) |> 
+  summarize(perc_censored = mean(perc_censored))
+
+plot_indep = d |> 
+  make_boxplot()
+plot_indep
+#ggsave(filename = "right-lod-naive-bias", device = "png", width = 12, height = 8, units = "in")
+```
+
+### $X | Z$ 
+
+As with $X \perp Z$, except that $X | Z \sim \textrm{Weibull}(0.75 - 0.25Z, 0.25)$. 
+
+```{r, eval = F}
+# Data generation function based on Atem et al. (2017)'s "independent censoring" censoring
+generate_data = function(n, censoring = "light") {
+  z = rbinom(n = n, size = 1, prob = 0.5) # Uncensored covariate
+  x = rweibull(n = n, shape = 0.75 - 0.25 * z, scale = 0.25)  # To-be-censored covariate
+  e = rnorm(n = n, mean = 0, sd = 1) # Random errors
+  y = 1 + 0.5 * x + 0.25 * z + e # Continuous outcome
+  c = qweibull(p = ifelse(test = censoring == "light", 
+                          yes = 0.12, 
+                          no = ifelse(test = censoring == "heavy", 
+                                      yes = 0.4, 
+                                      no = 0.78)), 
+               shape = 0.75, scale = 0.25, 
+               lower.tail = FALSE) # LOD censoring mechanism
+  w = pmin(x, c) # Observed covariate value
+  d = as.numeric(x <= c) # "Event" indicator
+  dat = data.frame(x, z, w, y, d) # Construct data set
+  return(dat)
+}
+
+# Set the number of replicates per setting
+reps = 1000
+
+# Choose seed 
+sim_seed = 114
+
+# Loop over different censoring rates: light, heavy, extra heavy
+for (censoring in c("light", "heavy", "extra_heavy")) {
+  # And different sample sizes n = 100, 500, 1000, 2000
+  for (n in c(100, 500, 1000, 2000)){
+    # For reproducibility
+    set.seed(sim_seed) 
+    
+    # Create dataframe to save results for setting
+    sett_res = data.frame(sim = paste(sim_seed, 1:reps, sep = "-"), censoring, n, perc_censored = NA, 
+                          true_alpha = 1, true_beta = 0.5, true_gamma = 0.25, 
+                          est_alpha = NA, est_beta = NA, est_gamma = NA, 
+                          se_alpha = NA, se_beta = NA, se_gamma = NA
+    )
+    
+    # Loop over replicates 
+    for (r in 1:reps) {
+      # Generate data
+      dat = generate_data(n = n, 
+                          censoring = censoring)
+      
+      # Save % censored
+      sett_res$perc_censored[r] = 1 - mean(dat$d)
+      
+      # Method 1: Full cohort analysis
+      fit_naive = lm(y ~ w + z, data = dat)
+      sett_res[r, c("est_alpha", "est_beta", "est_gamma")] <- fit_naive$coefficients
+      sett_res[r, c("se_alpha", "se_beta", "se_gamma")] <- sqrt(diag(vcov(fit_naive)))
+      
+      # Save results
+      write.csv(x = sett_res, 
+                file = paste0("~/Downloads/naive/right-lod/XdepZ/", censoring, "_n", n, "_seed", sim_seed, ".csv"), 
+                row.names = F)
+    }
+  }
+}
+```
+
+```{r, fig.width = 12, fig.height = 8, echo = FALSE}
+f = paste0("~/Downloads/naive/right-lod/XdepZ/", list.files("~/Downloads/naive/right-lod/XdepZ/"))
+d = do.call(rbind, 
+            lapply(X = f, FUN = read.csv))
+
+# Check censoring rates 
+d |> 
+  group_by(censoring) |> 
+  summarize(perc_censored = mean(perc_censored))
+
+plot_dep = d |> 
+  make_boxplot()
+plot_dep
+#ggsave(filename = "right-lod-naive-bias", device = "png", width = 12, height = 8, units = "in")
+```
+
+### Comments 
+
+  -   When $X \perp Z$ (plot **A**), the naive analysis sees bias in estimating the intercept $\hat{\alpha}$ and coefficient $\hat{\beta}$ on censored $X$. There was upward bias in $\hat{\beta}$ and downward bias in $\hat{\alpha}$. The magnitude of the bias in either parameter worsened as the censoring rate increased and was unchanged by sample size. However, the $\hat{\gamma}$ on uncensored $Z$ seemed unaffected. 
+  
+  -   When $X | Z$ (plot **B**), the naive analysis sees bias in estimating all parameters (even the one on uncensored $Z$). Patterns for increasing censoring rates or sample sizes (i.e., leading to higher-magnitude or unchanged bias, respectively) were the same as for $X \perp Z$ above. There was upward bias in $\hat{\beta}$ **and** $\hat{\gamma}$, and downward bias in $\hat{\alpha}$.
+
+```{r naive-right-lod, fig.width = 12, fig.height = 12, echo = F}
+ggpubr::ggarrange(plot_indep, plot_dep, common.legend = TRUE, 
+                  nrow = 2, labels = c("A", "B"))
+```
+
+## Left LOD censoring {.tabset}
+
+### $X \perp Z$ 
+
+Simulate 1000 datasets each for samples of $n = 100, 500, 1000, 2000$ observations under light (12\%), heavy (~40%), and extra heavy (~78%) censoring. Specifically, 
+
+  -   $Z \sim \textrm{Bernoulli}(0.5)$,
+  -   $X | Z = X \sim \textrm{Weibull}(0.75, 0.25)$,
+  -   $Y = 1 + 0.5X + 0.25Z + \epsilon$ (for $\epsilon \sim \textrm{N}(0, 1)$),
+  -   $C \sim \textrm{Expo}(q)$ (for $q = 0.02$ for light, $q = 0.10$ for heavy, and $q = 0.43$ for extra heavy), 
+  -   $W = \min(X, C)$, and 
+  -   $\Delta = \textrm{I}(X \leq C)$. 
+
+```{r, eval = F}
+# Data generation function based on Atem et al. (2017)'s "independent censoring" censoring
+generate_data = function(n, censoring = "light") {
+  z = rbinom(n = n, size = 1, prob = 0.5) # Uncensored covariate
+  x = rweibull(n = n, shape = 0.75, scale = 0.25)  # To-be-censored covariate
+  e = rnorm(n = n, mean = 0, sd = 1) # Random errors
+  y = 1 + 0.5 * x + 0.25 * z + e # Continuous outcome
+  c = qweibull(p = ifelse(test = censoring == "light", 
+                          yes = 0.12, 
+                          no = ifelse(test = censoring == "heavy", 
+                                      yes = 0.40, 
+                                      no = 0.78)), 
+               shape = 0.75, scale = 0.25) # LOD censoring mechanism
+  w = pmax(x, c) # Observed covariate value
+  d = as.numeric(x >= c) # "Event" indicator
+  dat = data.frame(x, z, w, y, d) # Construct data set
+  return(dat)
+}
+
+# Set the number of replicates per setting
+reps = 1000
+
+# Choose seed 
+sim_seed = 114
+
+# Loop over different censoring rates: light, heavy, extra heavy
+for (censoring in c("light", "heavy", "extra_heavy")) {
+  # And different sample sizes n = 100, 500, 1000, 2000
+  for (n in c(100, 500, 1000, 2000)){
+    # For reproducibility
+    set.seed(sim_seed) 
+    
+    # Create dataframe to save results for setting
+    sett_res = data.frame(sim = paste(sim_seed, 1:reps, sep = "-"), censoring, n, perc_censored = NA, 
+                          true_alpha = 1, true_beta = 0.5, true_gamma = 0.25, 
+                          est_alpha = NA, est_beta = NA, est_gamma = NA, 
+                          se_alpha = NA, se_beta = NA, se_gamma = NA
+    )
+    
+    # Loop over replicates 
+    for (r in 1:reps) {
+      # Generate data
+      dat = generate_data(n = n, 
+                          censoring = censoring)
+      
+      # Save % censored
+      sett_res$perc_censored[r] = 1 - mean(dat$d)
+      
+      # Method 1: Full cohort analysis
+      fit_naive = lm(y ~ w + z, data = dat)
+      sett_res[r, c("est_alpha", "est_beta", "est_gamma")] <- fit_naive$coefficients
+      sett_res[r, c("se_alpha", "se_beta", "se_gamma")] <- sqrt(diag(vcov(fit_naive)))
+      
+      # Save results
+      write.csv(x = sett_res, 
+                file = paste0("~/Downloads/naive/left-lod/XindepZ/", censoring, "_n", n, "_seed", sim_seed, ".csv"), 
+                row.names = F)
+    }
+  }
+}
+```
+
+```{r, fig.width = 12, fig.height = 8, echo = FALSE}
+f = paste0("~/Downloads/naive/left-lod/XindepZ/", list.files("~/Downloads/naive/left-lod/XindepZ/"))
+d = do.call(rbind, 
+            lapply(X = f, FUN = read.csv))
+
+# Check censoring rates 
+d |> 
+  group_by(censoring) |> 
+  summarize(perc_censored = mean(perc_censored))
+
+plot_indep = d |> 
+  make_boxplot()
+plot_indep 
+```
+
+### $X | Z$ 
+
+As with $X \perp Z$, except that $X | Z \sim \textrm{Weibull}(0.75 - 0.25Z, 0.25)$. 
+
+```{r, eval = F}
+# Data generation function based on Atem et al. (2017)'s "independent censoring" censoring
+generate_data = function(n, censoring = "light") {
+  z = rbinom(n = n, size = 1, prob = 0.5) # Uncensored covariate
+  x = rweibull(n = n, shape = 0.75 - 0.25 * z, scale = 0.25)  # To-be-censored covariate
+  e = rnorm(n = n, mean = 0, sd = 1) # Random errors
+  y = 1 + 0.5 * x + 0.25 * z + e # Continuous outcome
+  c = qweibull(p = ifelse(test = censoring == "light", 
+                          yes = 0.12, 
+                          no = ifelse(test = censoring == "heavy", 
+                                      yes = 0.40, 
+                                      no = 0.78)), 
+               shape = 0.75, scale = 0.25) # LOD censoring mechanism
+  w = pmax(x, c) # Observed covariate value
+  d = as.numeric(x >= c) # "Event" indicator
+  dat = data.frame(x, z, w, y, d) # Construct data set
+  return(dat)
+}
+
+# Set the number of replicates per setting
+reps = 1000
+
+# Choose seed 
+sim_seed = 114
+
+# Loop over different censoring rates: light, heavy, extra heavy
+for (censoring in c("light", "heavy", "extra_heavy")) {
+  # And different sample sizes n = 100, 500, 1000, 2000
+  for (n in c(100, 500, 1000, 2000)){
+    # For reproducibility
+    set.seed(sim_seed) 
+    
+    # Create dataframe to save results for setting
+    sett_res = data.frame(sim = paste(sim_seed, 1:reps, sep = "-"), censoring, n, perc_censored = NA, 
+                          true_alpha = 1, true_beta = 0.5, true_gamma = 0.25, 
+                          est_alpha = NA, est_beta = NA, est_gamma = NA, 
+                          se_alpha = NA, se_beta = NA, se_gamma = NA
+    )
+    
+    # Loop over replicates 
+    for (r in 1:reps) {
+      # Generate data
+      dat = generate_data(n = n, 
+                          censoring = censoring)
+      
+      # Save % censored
+      sett_res$perc_censored[r] = 1 - mean(dat$d)
+      
+      # Method 1: Full cohort analysis
+      fit_naive = lm(y ~ w + z, data = dat)
+      sett_res[r, c("est_alpha", "est_beta", "est_gamma")] <- fit_naive$coefficients
+      sett_res[r, c("se_alpha", "se_beta", "se_gamma")] <- sqrt(diag(vcov(fit_naive)))
+      
+      # Save results
+      write.csv(x = sett_res, 
+                file = paste0("~/Downloads/naive/left-lod/XdepZ/", censoring, "_n", n, "_seed", sim_seed, ".csv"), 
+                row.names = F)
+    }
+  }
+}
+```
+
+```{r, fig.width = 12, fig.height = 8, echo = FALSE}
+f = paste0("~/Downloads/naive/left-lod/XdepZ/", list.files("~/Downloads/naive/left-lod/XdepZ/"))
+d = do.call(rbind, 
+            lapply(X = f, FUN = read.csv))
+
+# Check censoring rates 
+d |> 
+  group_by(censoring) |> 
+  summarize(perc_censored = mean(perc_censored))
+
+plot_dep = d |> 
+  make_boxplot()
+plot_dep
+#ggsave(filename = "right-lod-naive-bias", device = "png", width = 12, height = 8, units = "in")
+```
+
+### Comments 
+
+  -   When $X \perp Z$ (plot **A**), the naive analysis sees bias in estimating the intercept $\hat{\alpha}$ and coefficient $\hat{\beta}$ on censored $X$. There was upward bias in $\hat{\beta}$ and downward bias in $\hat{\alpha}$. The magnitude of the bias in either parameter worsened as the censoring rate increased and was unchanged by sample size. However, the $\hat{\gamma}$ on uncensored $Z$ seemed unaffected. 
+  
+  -   When $X | Z$ (plot **B**), the naive analysis sees bias in estimating all parameters (even the one on uncensored $Z$), but the bias in $\hat{\gamma}$ was slight. Patterns for increasing censoring rates or sample sizes (i.e., leading to higher-magnitude or unchanged bias, respectively) were the same as for $X \perp Z$ above. There was upward bias in $\hat{\beta}$, and downward bias in $\hat{\alpha}$ **and** $\hat{\gamma}$.
+
+```{r naive-left-lod, fig.width = 12, fig.height = 12, echo = F}
+ggpubr::ggarrange(plot_indep, plot_dep, common.legend = TRUE, 
+                  nrow = 2, labels = c("A", "B"))
+```
