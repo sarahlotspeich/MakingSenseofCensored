@@ -77,7 +77,7 @@ fit_reverse_survival_thlm
     ##  Hypothesis test of association, H0: a1 = 0
     ## p-value = 0.0000
 
-### SECTION 4: METHODS THAT PRODUCE BIAS
+### SECTION 4: AD HOC METHODS THAT PRODUCE BIAS
 
 #### 4.1 Naive Analysis
 
