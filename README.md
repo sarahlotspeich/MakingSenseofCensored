@@ -1,10 +1,8 @@
 Making sense of censored covariates: Statistical methods for studies of
 Huntington’s disease
 ================
-
+### Lotspeich, Ashner, Vazquez, Richardson, Grosser, Bodek and Garcia (2023+) 
 ## Software Supplement
-
-## Lotspeich, Ashner, Vazquez, Richardson, Grosser, Bodek and Garcia (2023+) 
 
 ``` r
 # Set seed for reproducibility
