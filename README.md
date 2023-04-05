@@ -1,12 +1,19 @@
 Making sense of censored covariates: Statistical methods for studies of
 Huntington’s disease
 ================
-### Lotspeich, Ashner, Vazquez, Richardson, Grosser, Bodek and Garcia (2023+) 
+
 ## Software Supplement
 
-### LOAD PACKAGES
+## Lotspeich et al. 
 
 ``` r
+# Set seed for reproducibility
+set.seed(128)
+```
+
+``` r
+# packages needed 
+
 ## Load the censCov package (Qian et al 2018)
 ### contains thlm function for thresholding methods, complete case, and reverse survival regression
 library(censCov)
@@ -17,11 +24,6 @@ library(survival)
 ```
 
 ### DATA GENERATION
-
-``` r
-# Set seed for reproducibility
-set.seed(128)
-```
 
 Simulate a dataset for a sample of *n* = 1000 observations under heavy
 (\~40%) **random right censoring**. Specifically,
@@ -45,7 +47,7 @@ d = as.numeric(x <= c) ## "Event" indicator
 random_right_dat = data.frame(z, w, y, d) ## Construct data set
 ```
 
-### SECTION 3: REVERSE SURVIVAL REGRESSION
+### SECTION 3: USING REVERSE SURVIVAL REGRESSION TO HANDLE A CENSORED COVARIATE
 
 ``` r
 # Reverse survival regression "by hand"
@@ -77,7 +79,7 @@ fit_reverse_survival_thlm
     ##  Hypothesis test of association, H0: a1 = 0
     ## p-value = 0.0000
 
-### SECTION 4: AD HOC METHODS THAT PRODUCE BIAS
+### SECTION 4: METHODS THAT PRODUCE BIAS
 
 #### 4.1 Naive Analysis
 
@@ -97,6 +99,29 @@ data.frame(coeff = coeff_naive, se = se_naive)
     ## z           0.2408399 0.06669586
 
 #### 4.2 Substitution
+
+``` r
+# Substitution
+## Define function which will be used to replace censored W
+f.w <- function(w){
+  return(w / 2) # for illustrative purposes, we replace w with w / 2
+}
+## Create copy of dataset to modify
+random_right_dat_copy <- random_right_dat
+## replace censored w with w / 2
+random_right_dat_copy$fw <- ifelse(d==1, f.w(w),w)
+## fit linear model on modified dataset
+fit_substitution = lm(y ~ fw + z, data = random_right_dat_copy)
+coeff_substitution <- fit_substitution$coefficients
+se_substitution <- sqrt(diag(vcov(fit_substitution)))
+## Inspect results
+data.frame(coeff = coeff_substitution, se = se_substitution)
+```
+
+    ##                 coeff         se
+    ## (Intercept) 0.9779523 0.05406085
+    ## fw          1.1668621 0.22103866
+    ## z           0.2369362 0.06657209
 
 ### SECTION 5: COMPLETE CASE ANALYSIS
 
@@ -138,35 +163,23 @@ data.frame(coeff = coeff_complete_thlm, se = se_complete_thlm, row.names = c("x"
 
 ``` r
 # IPW analysis
-## Estimate probabilities of being uncensored
-### Fit a model for the hazard function of being censored given z 
-fit_weights = coxph(formula = Surv(time = w, event = (1-d)) ~ z, 
-                    data = random_right_dat)
-### Use the model to estimate the survival function of c
-### (i.e., probability of being uncensored) for each complete observation
-prob_uncensor = survfit(formula = fit_weights, 
-                        newdata = random_right_dat_complete)
-### Use the summary() function to get p(d = 1|z) for each complete case
+## Estimate probabilities of being uncensored. Can use a logisitc regression, 
+## Cox-proportional hazards model, Kapla-Meier curve
 
+### In this example we fit a logisitc regression model using the logit link 
+### function given z on the probability of being observed. 
+mylogisitc = glm(d ~ z, data=random_right_dat, family = "binomial")
 
+# Estimate weights for only observed cases: 1/Pr(Delta=1)
+random_right_dat_complete$weights_logisitc = 
+  1/predict(mylogisitc, random_right_dat_complete)
 
-weights = data.frame(x = summary(object = prob_uncensor, 
-                                 times = extend)$time, 
-                     ipw = 1 / diag(summary(object = prob_uncensor, extend = TRUE)$surv))
-
-weights = data.frame()
-weights_df <- data.frame(X = summary(G, times = data_sim$X, extend = TRUE)$time,
-                        weights = summary(G, times = data_sim$X, extend = TRUE)$surv %>% diag())
-      data_sim <- data_sim %>% left_join(weights_df, by = "X")
-
-## Remove observations with censored x
-random_right_dat_complete = random_right_dat[random_right_dat$d == 1, ]
-## Fit the model to "complete" cases (with uncensored x)
-fit_complete = lm(y ~ w + z, data = random_right_dat_complete)
-coeff_complete <- fit_complete$coefficients
-se_complete <- sqrt(diag(vcov(fit_complete)))
+## Fit the model to "complete" weighted cases (with uncensored x)
+fit_ipw = lm(y ~ w + z, data = random_right_dat_complete, weights = weights_logisitc)
+coeff_ipw <- fit_ipw$coefficients
+se_ipw <- sqrt(diag(vcov(fit_ipw)))
 ## Inspect results
-data.frame(coeff = coeff_complete, se = se_complete)
+data.frame(coeff = coeff_ipw, se = se_ipw)
 ```
 
 #### 6.2 Augmented inverse probability weighting (AIPW)
@@ -183,138 +196,11 @@ Information section [here](https://doi.org/10.1002/bimj.201700090).
 
 #### Multiple imputation
 
-### SECTION 8: MAXIMUM LIKELIHOOD METHODS
+### SECTION 8: MAXIMUM LIKELIHOOD ESTIMATION (MLE)
 
 #### Parametric MLE
 
-```{r}
-# Parametric MLE analysis
-## Define the log-likelihood function based on Equation (3) 
-## Per the data generation, assume a normal for Y|X,Z and a Weibull for X|Z
-joint_dens = function(params) {
-
-}
-
-loglik = function(params) {
-    # Separate the parameter vector into the two models 
-    ## Model parameters for Y|X,Z
-    theta = params[1:4]
-    
-    ## Model parameters for X|Z
-    eta = params[-c(1:4)] 
-    
-    # Compute log-likelihood contributions for uncensored data 
-    ll = d * log(dnorm(y, mean = (theta[1] + theta[2] * w + theta[3] * z), sd = theta[4]) * dweib(w, shape = eta[1], scale = (eta[2] + eta[3] * z)))
-    
-    # Add log-likelihood contributions for censored data
-    ## Write internal function to integrate censored x out of the joint for each observation
-    integrate_joint = function(data_row) {
-      Wi <- as.numeric(data_row[W])
-      Yi <- data_row[Y]
-      Zi <- data_row[Z]
-      return(
-        tryCatch(expr = integrate(f = function(x) dnorm(y, mean = (theta[1] + theta[2] * x + theta[3] * z), sd = theta[4]) * dweib(x, shape = eta[1], scale = (eta[2] + eta[3] * z)),
-                                  lower = Wi, 
-                                  upper = Inf)$value,
-                 error = function(err) {0})
-      )
-    }
-    
-    # Create simulated dataset 
-    z = rbinom(n = 1000, size = 1, prob = 0.5) ## Uncensored covariate
-    x = rweibull(n = 1000, shape = 0.75, scale = 0.25)  ## To-be-censored covariate
-    e = rnorm(n = 1000, mean = 0, sd = 1) ## Random errors
-    y = 1 + 0.5 * x + 0.25 * z + e ## Continuous outcome
-    c = rexp(n = 1000, rate = 2.9) ## Random censoring mechanism
-    w = pmin(x, c) ## Observed covariate value
-    d = as.numeric(x <= c) ## "Event" indicator
-    random_right_dat = data.frame(z, w, y, d) ## Construct data set
-}
-```
-
-```{r}
-loglik <- function(params, Y, X, W, D, Z = NULL, data, subdivisions = 100, distY = "normal", distX = "normal", cens = "right") {
-  ####################################################
-  # Pre-processing ###################################
-  ####################################################
-  # < number of uncensored subjects > ----------------
-  n1 <- sum(data[, D]) # -----------------------------
-  # ---------------- < number of uncensored subjects >
-  # Reordered data to be uncensored first ------------
-  data <- data[order(data[, D], decreasing = TRUE), ]
-  # ------------ Reordered data to be uncensored first
-  # Create subset of uncensored subjects' data -------
-  uncens_data <- data[1:n1, ]
-  # ------- Create subset of uncensored subjects' data
-  # Create subset of censored subjects' data -------
-  cens_data <- data[-c(1:n1), ]
-  # ------- Create subset of censored subjects' data
-
-  ####################################################
-  # Joint density P(Y,X,Z) ###########################
-  ####################################################
-  pYXandZ_uncens <- calc_pYXandZ(x = uncens_data[, X],
-                                 y = uncens_data[, Y],
-                                 z = uncens_data[, Z],
-                                 lengthZ = length(Z),
-                                 distY = distY,
-                                 distX = distX,
-                                 params = params)
-
-  ####################################################
-  # Likelihood (Uncensored) ##########################
-  ####################################################
-  if (any(is.na(pYXandZ_uncens))) {
-    # If params are out of domain, calc_pYXandZ returns NA
-    ## And the log-likelihood needs to be arbitrarily "huge"
-    return(1E8)
-  } else {
-    # Replace P(Y,X,Z) = 0 with P(Y,X,Z) = 1 so that
-    ## log P(Y,X,Z) = 0.
-    pYXandZ_uncens[pYXandZ_uncens == 0] = 1
-    ll <- sum(log(pYXandZ_uncens))
-  }
-
-  ####################################################
-  # Likelihood (Censored) ############################
-  ####################################################
-  if (nrow(cens_data) > 0) {
-    integrate_pYXandZ <- function(data_row) {
-      Wi <- as.numeric(data_row[W])
-      Yi <- data_row[Y]
-      Zi <- data_row[Z]
-      return(
-        tryCatch(expr = integrate(f = calc_pYXandZ,
-                                  lower = ifelse(test = cens == "right", Wi, -Inf),
-                                  upper = ifelse(test = cens == "right", Inf, Wi),
-                                  subdivisions = subdivisions,
-                                  y = Yi,
-                                  z = Zi,
-                                  lengthZ = length(Z),
-                                  distY = distY,
-                                  distX = distX,
-                                  params = params)$value,
-                 error = function(err) {0})
-      )
-    }
-    int_pYXandZ_cens <- apply(X = cens_data,
-                              MARGIN = 1,
-                              FUN = integrate_pYXandZ)
-    log_int_pYXandZ_cens <- log(int_pYXandZ_cens)
-    log_int_pYXandZ_cens[log_int_pYXandZ_cens == -Inf] <- 0
-    ll <- ll + sum(log_int_pYXandZ_cens)
-  }
-
-  # Return (-1) x log-likelihood for use with nlm() --
-  return(- ll)
-  # -- Return (-1) x log-likelihood for use with nlm()
-}
-```
-
 #### Semiparametric MLE
-
-There is no simple implementation of semiparametric MLE for censored covariates that
-we are aware of. However, Kong and Nan give an overview of the necessary steps to coding on in Section 3 of their paper, which can be found [here](https://academic.oup.com/biomet/article/103/1/161/2389883#113398541).
 
 ### SECTION 9: BAYESIAN METHODS
 

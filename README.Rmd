@@ -89,6 +89,25 @@ data.frame(coeff = coeff_naive, se = se_naive)
 
 #### 4.2 Substitution 
 
+```{r}
+# Substitution
+## Define function which will be used to replace censored W
+f.w <- function(w){
+  return(w / 2) # for illustrative purposes, we replace w with w / 2
+}
+## Create copy of dataset to modify
+random_right_dat_copy <- random_right_dat
+## replace censored w with w / 2
+random_right_dat_copy$fw <- ifelse(d==1, f.w(w),w)
+## fit linear model on modified dataset
+fit_substitution = lm(y ~ fw + z, data = random_right_dat_copy)
+coeff_substitution <- fit_substitution$coefficients
+se_substitution <- sqrt(diag(vcov(fit_substitution)))
+## Inspect results
+data.frame(coeff = coeff_substitution, se = se_substitution)
+```
+
+
 ### SECTION 5: COMPLETE CASE ANALYSIS 
 
 ```{r}
