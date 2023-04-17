@@ -172,7 +172,93 @@ There is no simple implementation of AIPW for censored covariates that we are aw
 
 #### Parametric MLE 
 
+```{r, warning=FALSE}
+# Parametric MLE analysis
+
+## Define the log-likelihood function based on Equation (3) 
+loglik = function(params, data) {
+    # Separate the parameter vector into the two models 
+    ## Model parameters for Y|X,Z
+    theta = params[1:4]
+    ## Model parameters for X|Z
+    eta = params[-c(1:4)] 
+    
+    # Check that params are valid 
+    ## No restrictions on theta, 
+    ## but shape/scale for Weibull must be > 0
+    if(any(c(eta[1], (eta[2] + eta[3] * data$z)) < 0)) {
+      return(-9999) ### If invalid, return really big number
+    }
+    
+    # Compute log-likelihood contributions for uncensored data 
+    pYgivXZ = dnorm(data$y, mean = (theta[1] + theta[2] * data$w + theta[3] * data$z), sd = theta[4])
+        pXgivZ = dweibull(data$w, shape = eta[1], scale = (eta[2] + eta[3] * data$z))
+    ll = sum(data$d * log(pYgivXZ * pXgivZ))
+    
+    # Add log-likelihood contributions for censored data    
+    ## Write internal function to integrate censored x out of the joint density for each observation
+    integrate_joint = function(data_row) {
+      ### Extract ith observation's variables from data_row
+      Wi <- data_row["w"]
+      Yi <- data_row["y"]
+      Zi <- data_row["z"]
+      
+      ### Write internal function for the joint density
+      ### Per the data generation, assume a normal for Y|X,Z and a Weibull for X|Z
+      joint_dens = function(x) {
+        pYgivXZ = dnorm(Yi, mean = (theta[1] + theta[2] * x + theta[3] * Zi), sd = theta[4])
+        pXgivZ = dweibull(x, shape = eta[1], scale = (eta[2] + eta[3] * Zi))
+        return(pYgivXZ * pXgivZ)
+      }
+      
+      ## Integrate over joint density
+      return(
+        tryCatch(expr = integrate(f = joint_dens,
+                                  lower = Wi, 
+                                  upper = Inf)$value,
+                 error = function(err) {0})
+      )
+    }
+    
+    # Apply the integrate_joint() function to each row of censored data
+    data_cens = data[data$d == 0, ]
+    int_cens = apply(X = data_cens,
+                     MARGIN = 1,
+                     FUN = integrate_joint)
+    
+    # Take the log
+    log_int_cens = log(int_cens)
+    log_int_cens[log_int_cens == -Inf] = 0 ## Replace any Infinite values 
+    ll <- ll + sum(log_int_cens)
+    
+    # Return log-likelihood
+    return(ll)
+}
+
+# Use complete-case estimators as initial values 
+## Have to start with naive iniitial values to get them
+params0 = c(0, 0, 0, 1, 0.1, 0.1, 0.1) ### Naive initial values
+cc_mle = nlm(f = function(params) - loglik(params = params, data = random_right_dat_complete), ### Have to negate, since nlm() finds the minimum
+             p = params0)
+cc_mle
+
+# Find parametric MLEs 
+mle = nlm(f = function(params) - loglik(params = params, data = random_right_dat), 
+             p = cc_mle$estimate, 
+          hessian = TRUE)
+mle 
+
+## Inspect results 
+coeff_mle = mle$estimate[1:3]
+se_mle = sqrt(diag(solve(mle$hessian)))[1:3]
+## Inspect results
+data.frame(coeff = coeff_mle, se = se_mle)
+```
+Note: Sometimes the numerical approximations to the `hessian`matrix can result in negative variance estimates when inverted. A sandwich covariance estimator could be coded that would not have this problem and would also offer robustness to potential model misspecification.
+
 #### Semiparametric MLE 
+
+There is no simple implementation of semiparametric MLE for censored covariates that we are aware of. However, Kong and Nan give an overview of the necessary steps to coding on in Section 3 of their paper, which can be found [here](https://academic.oup.com/biomet/article/103/1/161/2389883#113398541).
 
 ### SECTION 9: BAYESIAN METHODS
 

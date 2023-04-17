@@ -25,15 +25,16 @@ library(survival)
 
 ### DATA GENERATION
 
-Simulate a dataset for a sample of *n* = 1000 observations under heavy
+Simulate a dataset for a sample of $n = 1000$ observations under heavy
 (\~40%) **random right censoring**. Specifically,
 
--   *Z* ∼ Bernoulli(0.5),
--   *X* ∼ Weibull(0.75, 0.25),
--   *Y* = 1 + 0.5*X* + 0.25*Z* + *ϵ* (for *ϵ* ∼ N(0, 1)),
--   *C* ∼ Expo(2.9),
--   *W* = min (*X*, *C*), and
--   *Δ* = I(*X* ≤ *C*).
+- $Z \sim \textrm{Bernoulli}(0.5)$,
+- $X \sim \textrm{Weibull}(0.75, 0.25)$,
+- $Y = 1 + 0.5X + 0.25Z + \epsilon$ (for
+  $\epsilon \sim \textrm{N}(0, 1)$),
+- $C \sim \textrm{Expo}(2.9)$,
+- $W = \min(X, C)$, and
+- $\Delta = \textrm{I}(X \leq C)$.
 
 ``` r
 # Create simulated dataset 
@@ -200,33 +201,46 @@ Information section [here](https://doi.org/10.1002/bimj.201700090).
 
 #### Parametric MLE
 
-The parametric MLE can be coded by first writing a `function` for the appropriate log-likelihood and then using a built-in optimization function like `nlm()` to maximize it. 
-
-```{r}
+``` r
 # Parametric MLE analysis
+
 ## Define the log-likelihood function based on Equation (3) 
-loglik = function(params) {
+loglik = function(params, data) {
     # Separate the parameter vector into the two models 
     ## Model parameters for Y|X,Z
     theta = params[1:4]
     ## Model parameters for X|Z
     eta = params[-c(1:4)] 
     
+    # Check that params are valid 
+    ## No restrictions on theta, 
+    ## but shape/scale for Weibull must be > 0
+    if(any(c(eta[1], (eta[2] + eta[3] * data$z)) < 0)) {
+      return(-9999) ### If invalid, return really big number
+    }
+    
     # Compute log-likelihood contributions for uncensored data 
-    ll = d * log(dnorm(y, mean = (theta[1] + theta[2] * w + theta[3] * z), sd = theta[4]) * dweib(w, shape = eta[1], scale = (eta[2] + eta[3] * z)))
+    pYgivXZ = dnorm(data$y, mean = (theta[1] + theta[2] * data$w + theta[3] * data$z), sd = theta[4])
+        pXgivZ = dweibull(data$w, shape = eta[1], scale = (eta[2] + eta[3] * data$z))
+    ll = sum(data$d * log(pYgivXZ * pXgivZ))
     
     # Add log-likelihood contributions for censored data    
     ## Write internal function to integrate censored x out of the joint density for each observation
     integrate_joint = function(data_row) {
       ### Extract ith observation's variables from data_row
-      Wi <- data_row$w
-      Yi <- data_row$y
-      Zi <- data_row$z
+      Wi <- data_row["w"]
+      Yi <- data_row["y"]
+      Zi <- data_row["z"]
+      
       ### Write internal function for the joint density
       ### Per the data generation, assume a normal for Y|X,Z and a Weibull for X|Z
-      joint_dens = function(x, params) {
-        dnorm(y, mean = (theta[1] + theta[2] * x + theta[3] * Zi), sd = theta[4]) * dweib(x, shape = eta[1], scale = (eta[2] + eta[3] * Zi)
+      joint_dens = function(x) {
+        pYgivXZ = dnorm(Yi, mean = (theta[1] + theta[2] * x + theta[3] * Zi), sd = theta[4])
+        pXgivZ = dweibull(x, shape = eta[1], scale = (eta[2] + eta[3] * Zi))
+        return(pYgivXZ * pXgivZ)
       }
+      
+      ## Integrate over joint density
       return(
         tryCatch(expr = integrate(f = joint_dens,
                                   lower = Wi, 
@@ -235,22 +249,105 @@ loglik = function(params) {
       )
     }
     
-    int_pYXandZ_cens <- apply(X = cens_data,
-                              MARGIN = 1,
-                              FUN = integrate_pYXandZ)
-    log_int_pYXandZ_cens <- log(int_pYXandZ_cens)
-    log_int_pYXandZ_cens[log_int_pYXandZ_cens == -Inf] <- 0
-    ll <- ll + sum(log_int_pYXandZ_cens)
-  }
-  # Return (-1) x log-likelihood for use with nlm() --
-  return(- ll)
-  # -- Return (-1) x log-likelihood for use with nlm()
+    # Apply the integrate_joint() function to each row of censored data
+    data_cens = data[data$d == 0, ]
+    int_cens = apply(X = data_cens,
+                     MARGIN = 1,
+                     FUN = integrate_joint)
+    
+    # Take the log
+    log_int_cens = log(int_cens)
+    log_int_cens[log_int_cens == -Inf] = 0 ## Replace any Infinite values 
+    ll <- ll + sum(log_int_cens)
+    
+    # Return log-likelihood
+    return(ll)
 }
+
+# Use complete-case estimators as initial values 
+## Have to start with naive iniitial values to get them
+params0 = c(0, 0, 0, 1, 0.1, 0.1, 0.1) ### Naive initial values
+cc_mle = nlm(f = function(params) - loglik(params = params, data = random_right_dat_complete), ### Have to negate, since nlm() finds the minimum
+             p = params0)
+cc_mle
 ```
+
+    ## $minimum
+    ## [1] 230.1275
+    ## 
+    ## $estimate
+    ## [1]  0.9530803  0.8380148  0.1377387  1.0455007  0.8428130  0.1272139 -0.0151690
+    ## 
+    ## $gradient
+    ## [1] -5.087486e-06 -5.115908e-07 -2.074785e-06 -9.242826e-06  8.611778e-06
+    ## [6] -5.098855e-05 -3.856826e-05
+    ## 
+    ## $code
+    ## [1] 1
+    ## 
+    ## $iterations
+    ## [1] 39
+
+``` r
+# Find parametric MLEs 
+mle = nlm(f = function(params) - loglik(params = params, data = random_right_dat), 
+             p = cc_mle$estimate, 
+          hessian = TRUE)
+mle 
+```
+
+    ## $minimum
+    ## [1] 1246.51
+    ## 
+    ## $estimate
+    ## [1] 0.916605548 0.627679585 0.234670003 1.033105201 0.779527607 0.272232719
+    ## [7] 0.002993685
+    ## 
+    ## $gradient
+    ## [1] -1.491571e-04 -9.322321e-06 -1.330136e-04 -2.011601e-04 -2.892193e-04
+    ## [6] -2.464731e-04 -2.478373e-05
+    ## 
+    ## $hessian
+    ##            [,1]       [,2]      [,3]       [,4]       [,5]      [,6]      [,7]
+    ## [1,]  910.29626  275.98796 466.80350  -14.29612 -172.27298  283.1811  153.2661
+    ## [2,]  275.98796  172.28815 145.46445   64.26535 -147.47159 -648.0207 -765.6658
+    ## [3,]  466.80350  145.46445 466.80350  -12.28525  -98.87656  153.2661  153.2661
+    ## [4,]  -14.29612   64.26535 -12.28525 1760.62656 -119.69125  132.3969  114.1209
+    ## [5,] -172.27298 -147.47159 -98.87656 -119.69125 1658.60276 -676.4289 -732.6634
+    ## [6,]  283.18113 -648.02068 153.26611  132.39686 -676.42886 4178.9399 1642.7623
+    ## [7,]  153.26611 -765.66585 153.26611  114.12085 -732.66344 1642.7623 1642.7623
+    ## 
+    ## $code
+    ## [1] 1
+    ## 
+    ## $iterations
+    ## [1] 42
+
+``` r
+## Inspect results 
+coeff_mle = mle$estimate[1:3]
+se_mle = sqrt(diag(solve(mle$hessian)))[1:3]
+## Inspect results
+data.frame(coeff = coeff_mle, se = se_mle)
+```
+
+    ##       coeff         se
+    ## 1 0.9166055 0.04700406
+    ## 2 0.6276796        NaN
+    ## 3 0.2346700 0.06631695
+
+Note: Sometimes the numerical approximations to the `hessian`matrix can
+result in negative variance estimates when inverted. A sandwich
+covariance estimator could be coded that would not have this problem and
+would also offer robustness to potential model misspecification.
 
 #### Semiparametric MLE
 
-There is no simple implementation of semiparametric MLE for censored covariates that we are aware of. However, Kong and Nan give an overview of the necessary steps to coding on in Section 3 of their paper, which can be found [here](https://academic.oup.com/biomet/article/103/1/161/2389883#113398541).
+There is no simple implementation of semiparametric MLE for censored
+covariates that we are aware of. However, Kong and Nan give an overview
+of the necessary steps to coding on in Section 3 of their paper, which
+can be found
+[here](https://academic.oup.com/biomet/article/103/1/161/2389883#113398541).
 
 ### SECTION 9: BAYESIAN METHODS
 
