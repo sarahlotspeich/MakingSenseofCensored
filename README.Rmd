@@ -81,8 +81,8 @@ fit_reverse_survival_thlm
 # Naive analysis
 ## Fit the model using observed w in place of censored x
 fit_naive = lm(y ~ w + z, data = random_right_dat)
-coeff_naive <- fit_naive$coefficients
-se_naive <- sqrt(diag(vcov(fit_naive)))
+coeff_naive = fit_naive$coefficients
+se_naive = sqrt(diag(vcov(fit_naive)))
 ## Inspect results
 data.frame(coeff = coeff_naive, se = se_naive)
 ```
@@ -92,17 +92,17 @@ data.frame(coeff = coeff_naive, se = se_naive)
 ```{r}
 # Substitution
 ## Define function which will be used to replace censored W
-f.w <- function(w){
+f.w = function(w){
   return(w / 2) # for illustrative purposes, we replace w with w / 2
 }
 ## Create copy of dataset to modify
-random_right_dat_copy <- random_right_dat
+random_right_dat_copy = random_right_dat
 ## replace censored w with w / 2
-random_right_dat_copy$fw <- ifelse(d==1, f.w(w),w)
+random_right_dat_copy$fw = ifelse(d==1, f.w(w),w)
 ## fit linear model on modified dataset
 fit_substitution = lm(y ~ fw + z, data = random_right_dat_copy)
-coeff_substitution <- fit_substitution$coefficients
-se_substitution <- sqrt(diag(vcov(fit_substitution)))
+coeff_substitution = fit_substitution$coefficients
+se_substitution = sqrt(diag(vcov(fit_substitution)))
 ## Inspect results
 data.frame(coeff = coeff_substitution, se = se_substitution)
 ```
@@ -116,8 +116,8 @@ data.frame(coeff = coeff_substitution, se = se_substitution)
 random_right_dat_complete = random_right_dat[random_right_dat$d == 1, ]
 ## Fit the model to "complete" cases (with uncensored x)
 fit_complete = lm(y ~ w + z, data = random_right_dat_complete)
-coeff_complete <- fit_complete$coefficients
-se_complete <- sqrt(diag(vcov(fit_complete)))
+coeff_complete = fit_complete$coefficients
+se_complete = sqrt(diag(vcov(fit_complete)))
 ## Inspect results
 data.frame(coeff = coeff_complete, se = se_complete)
 ```
@@ -127,8 +127,8 @@ data.frame(coeff = coeff_complete, se = se_complete)
 fit_complete_thlm = thlm(y ~ w + z, cens = d, data = random_right_dat,
                             method = "cc", control = list(t0.plot = FALSE))
 ## estimating std dev of coefficient for x
-coeff_complete_thlm <- c(fit_complete_thlm$a1, fit_complete_thlm$a2)
-se_complete_thlm <- c(fit_complete_thlm$a1.sd, fit_complete_thlm$a2.sd)
+coeff_complete_thlm = c(fit_complete_thlm$a1, fit_complete_thlm$a2)
+se_complete_thlm = c(fit_complete_thlm$a1.sd, fit_complete_thlm$a2.sd)
 ## Inspect results
 data.frame(coeff = coeff_complete_thlm, se = se_complete_thlm, row.names = c("x", "z"))
 ```
@@ -152,8 +152,8 @@ random_right_dat_complete$weights_logisitc =
 
 ## Fit the model to "complete" weighted cases (with uncensored x)
 fit_ipw = lm(y ~ w + z, data = random_right_dat_complete, weights = weights_logisitc)
-coeff_ipw <- fit_ipw$coefficients
-se_ipw <- sqrt(diag(vcov(fit_ipw)))
+coeff_ipw = fit_ipw$coefficients
+se_ipw = sqrt(diag(vcov(fit_ipw)))
 ## Inspect results
 data.frame(coeff = coeff_ipw, se = se_ipw)
 ```
@@ -199,9 +199,9 @@ loglik = function(params, data) {
     ## Write internal function to integrate censored x out of the joint density for each observation
     integrate_joint = function(data_row) {
       ### Extract ith observation's variables from data_row
-      Wi <- data_row["w"]
-      Yi <- data_row["y"]
-      Zi <- data_row["z"]
+      Wi = data_row["w"]
+      Yi = data_row["y"]
+      Zi = data_row["z"]
       
       ### Write internal function for the joint density
       ### Per the data generation, assume a normal for Y|X,Z and a Weibull for X|Z
@@ -229,7 +229,7 @@ loglik = function(params, data) {
     # Take the log
     log_int_cens = log(int_cens)
     log_int_cens[log_int_cens == -Inf] = 0 ## Replace any Infinite values 
-    ll <- ll + sum(log_int_cens)
+    ll = ll + sum(log_int_cens)
     
     # Return log-likelihood
     return(ll)
@@ -274,8 +274,8 @@ There is no simple implementation of Bayesian Methods for censored covariates th
 fit_deletion_threshold = thlm(y ~ w + z, cens = d, data = random_right_dat,
                               method = "dt", control = list(t0.plot = FALSE),
                               B = 100) # 100 bootstrap replicates for estimating std dev of coefficient for x
-coeff_deletion_threshold <- c(fit_deletion_threshold$a1, fit_deletion_threshold$a2)
-se_deletion_threshold <- c(fit_deletion_threshold$a1.sd, fit_deletion_threshold$a2.sd)
+coeff_deletion_threshold = c(fit_deletion_threshold$a1, fit_deletion_threshold$a2)
+se_deletion_threshold = c(fit_deletion_threshold$a1.sd, fit_deletion_threshold$a2.sd)
 ## Inspect results
 data.frame(coeff = coeff_deletion_threshold, se = se_deletion_threshold, row.names = c("x", "z"))
 ```
@@ -288,8 +288,8 @@ data.frame(coeff = coeff_deletion_threshold, se = se_deletion_threshold, row.nam
 fit_complete_threshold = thlm(y ~ w + z, cens = d, data = random_right_dat,
                               method = "ct", control = list(t0.plot = FALSE),
                               B = 100) # 100 bootstrap replicates for estimating std dev of coefficient for x
-coeff_complete_threshold <- c(fit_complete_threshold$a1, fit_complete_threshold$a2)
-se_complete_threshold <- c(fit_complete_threshold$a1.sd, fit_complete_threshold$a2.sd)
+coeff_complete_threshold = c(fit_complete_threshold$a1, fit_complete_threshold$a2)
+se_complete_threshold = c(fit_complete_threshold$a1.sd, fit_complete_threshold$a2.sd)
 ## Inspect results
 data.frame(coeff = coeff_complete_threshold, se = se_complete_threshold, row.names = c("x", "z"))
 ```
