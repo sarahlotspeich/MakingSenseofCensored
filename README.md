@@ -200,6 +200,54 @@ Information section [here](https://doi.org/10.1002/bimj.201700090).
 
 #### Parametric MLE
 
+The parametric MLE can be coded by first writing a `function` for the appropriate log-likelihood and then using a built-in optimization function like `nlm()` to maximize it. 
+
+```{r}
+# Parametric MLE analysis
+## Define the log-likelihood function based on Equation (3) 
+loglik = function(params) {
+    # Separate the parameter vector into the two models 
+    ## Model parameters for Y|X,Z
+    theta = params[1:4]
+    ## Model parameters for X|Z
+    eta = params[-c(1:4)] 
+    
+    # Compute log-likelihood contributions for uncensored data 
+    ll = d * log(dnorm(y, mean = (theta[1] + theta[2] * w + theta[3] * z), sd = theta[4]) * dweib(w, shape = eta[1], scale = (eta[2] + eta[3] * z)))
+    
+    # Add log-likelihood contributions for censored data    
+    ## Write internal function to integrate censored x out of the joint density for each observation
+    integrate_joint = function(data_row) {
+      ### Extract ith observation's variables from data_row
+      Wi <- data_row$w
+      Yi <- data_row$y
+      Zi <- data_row$z
+      ### Write internal function for the joint density
+      ### Per the data generation, assume a normal for Y|X,Z and a Weibull for X|Z
+      joint_dens = function(x, params) {
+        dnorm(y, mean = (theta[1] + theta[2] * x + theta[3] * Zi), sd = theta[4]) * dweib(x, shape = eta[1], scale = (eta[2] + eta[3] * Zi)
+      }
+      return(
+        tryCatch(expr = integrate(f = joint_dens,
+                                  lower = Wi, 
+                                  upper = Inf)$value,
+                 error = function(err) {0})
+      )
+    }
+    
+    int_pYXandZ_cens <- apply(X = cens_data,
+                              MARGIN = 1,
+                              FUN = integrate_pYXandZ)
+    log_int_pYXandZ_cens <- log(int_pYXandZ_cens)
+    log_int_pYXandZ_cens[log_int_pYXandZ_cens == -Inf] <- 0
+    ll <- ll + sum(log_int_pYXandZ_cens)
+  }
+  # Return (-1) x log-likelihood for use with nlm() --
+  return(- ll)
+  # -- Return (-1) x log-likelihood for use with nlm()
+}
+```
+
 #### Semiparametric MLE
 
 There is no simple implementation of semiparametric MLE for censored covariates that we are aware of. However, Kong and Nan give an overview of the necessary steps to coding on in Section 3 of their paper, which can be found [here](https://academic.oup.com/biomet/article/103/1/161/2389883#113398541).
